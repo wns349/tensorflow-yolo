@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import cv2
@@ -5,6 +6,9 @@ import numpy as np
 import tensorflow as tf
 
 from layers import conv2d, max_pool2d, leaky_relu, input_layer
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--img", dest="img", help="Path to a test image")
 
 #####
 # TODO: extract to configs
@@ -203,19 +207,23 @@ class bounding_box(object):
         return np.minimum((self.x + self.w / 2.) * w, w), np.minimum((self.y + self.h / 2.) * h, h)
 
 
-def _main():
+def _main(args):
     print("Hello")
-    yolo = yolo_tiny(VOC_ANCHORS, VOC_LABELS)
 
     with tf.Session() as sess:
+        yolo = yolo_tiny(VOC_ANCHORS, VOC_LABELS)
         sess.run(tf.global_variables_initializer())
 
         # load pre-trained weights
         yolo.load_weights(sess, VOC_WEIGHTS)
 
+        print("Test image: {}".format(args.img))
+        if args.img is None or (not os.path.exists(args.img)):
+            print("File does not exist.")
+            return
+
         # predict
-        sample_img = "./img/sample_dog.jpg"
-        org_img = cv2.imread(sample_img)
+        org_img = cv2.imread(args.img)
         img = yolo.predict(sess, org_img)
         cv2.imwrite("./out.jpg", img)
 
@@ -223,4 +231,4 @@ def _main():
 
 
 if __name__ == "__main__":
-    _main()
+    _main(parser.parse_args())

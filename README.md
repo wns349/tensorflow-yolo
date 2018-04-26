@@ -1,0 +1,58 @@
+# TF-Yolo
+Python + TensorFlow implementation of YOLO (You Only Look Once).
+
+### Requirements
+- Python 3
+- Numpy
+- OpenCV
+- TensorFlow
+
+### YOLO Networks
+
+For the time being, I've only impelemented yolo network for [tiny-yolo-voc](https://github.com/pjreddie/darknet/blob/master/cfg/yolov2-tiny-voc.cfg).
+
+A pre-trained weights file can be downloaded [here](https://pjreddie.com/media/files/yolov2-tiny-voc.weights).
+
+### Quick Start
+
+1. Installation
+
+    ```bash
+    $ git clone https://github.com/wns349/tf-yolo.git
+
+    # Install requirements. Hopefully, `pip` takes care of it all
+    $ pip install numpy
+    $ pip install tensorflow (or tensorflow-cpu)
+    $ pip install opencv-python
+    ```
+
+
+2. Download pre-trained weights file
+
+    Download it from [here](https://pjreddie.com/media/files/yolov2-tiny-voc.weights) and keep it under `/bin` directory.
+    Or, maybe a single `wget` command as follow:
+    ```bash
+    $ wget https://pjreddie.com/media/files/yolov2-tiny-voc.weights -P ./bin/
+    ```
+
+3. Run prediction
+
+    ```bash
+    $ python ./yolo-tiny.py --img ./img/sample_dog.jpg
+    ```
+
+    After a successful inference, a resulting image with bounding boxes is saved as `./out.jpg`.
+
+
+### TODO
+- Generate yolo network at runtime
+- Train custom objects for detection
+- Yolo v3
+
+##### References
+I found the following projects/websites to be very helpful. Many thanks!
+- [Yolo](https://pjreddie.com/darknet/yolo/)
+- [Darknet](https://github.com/pjreddie/darknet/)
+- [YAD2K](https://github.com/allanzelener/YAD2K)
+- [Darkflow](https://github.com/thtrieu/darkflow/)
+- [MLBLR#yolov2](https://mlblr.com/includes/mlai/index.html#yolov2)
