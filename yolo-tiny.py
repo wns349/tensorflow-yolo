@@ -65,10 +65,15 @@ class yolo_tiny(object):
     def load_weights(self, tf_session, weights_path):
         print("Reading pre-trained weights from {}".format(weights_path))
         file_size = os.path.getsize(weights_path)
-        versions = np.memmap(weights_path, shape=4, offset=0, dtype=np.int)
-        print("Weights versions: ", versions)
+        major, minor, revision = np.memmap(weights_path, shape=3, offset=0, dtype=np.int)
+        print("major, minor, revision: {}, {}, {}".format(major, minor, revision))
 
-        offset = 16  # versions contains 4 int
+        if (major * 10 + minor) >= 2 and major < 1000 and minor < 1000:
+            seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.float32)
+            offset = 20
+        else:
+            seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.int)
+            offset = 16
 
         for layer in self.layers:
             if type(layer) == conv2d:
