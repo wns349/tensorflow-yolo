@@ -3,9 +3,7 @@ import os
 
 import cv2
 import numpy as np
-import tensorflow as tf
-
-from layers import conv2d, max_pool2d, leaky_relu, input_layer
+from layers import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--img", dest="img", help="Path to a test image")
@@ -46,6 +44,40 @@ def iou_score(box1, box2):
     return intersect_area / union_area
 
 
+def load_weights(tf_session, weights_path):
+    print("Reading pre-trained weights from {}".format(weights_path))
+    file_size = os.path.getsize(weights_path)
+
+    major, minor, revision = np.memmap(weights_path, shape=3, offset=0, dtype=np.int)
+    print("major, minor, revision: {}, {}, {}".format(major, minor, revision))
+
+    if (major * 10 + minor) >= 2 and major < 1000 and minor < 1000:
+        seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.float32)
+        offset = 20
+    else:
+        seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.int)
+        offset = 16
+
+    for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="yolo"):
+
+        tokens = var.name.split("/")
+        size = np.prod(var.shape.as_list())
+        shape = var.shape.as_list()
+        if "weights" in tokens[-1]:
+            shape = [shape[3], shape[2], shape[0], shape[1]]
+        data = np.memmap(weights_path, shape=size, offset=offset, dtype=np.float32)
+        value = np.reshape(data, shape)
+        if "weights" in tokens[-1]:
+            value = np.transpose(value, (2, 3, 1, 0))
+        tf_session.run(var.assign(value))
+        print(value)
+        offset += size * 4
+
+    print("Weights loaded. ({}/{} read)".format(offset, file_size))
+    if offset != file_size:
+        print("(warning) Offset and file size do not match. Possibly an incorrect weights file.")
+
+
 class yolo_tiny(object):
     def __init__(self, anchors, labels, threshold=0.5, iou_threshold=0.5):
         self.anchors = anchors
@@ -57,69 +89,28 @@ class yolo_tiny(object):
 
         self.layers = self.create_network()
 
-        self.input = self.layers[0].out
+        self.input = self.layers[0]
         self.input_h, self.input_w = self.input.shape.as_list()[1:3]
-        self.output = self.layers[-1].out
+        self.output = self.layers[-1]
         self.output_h, self.output_w = self.output.shape.as_list()[1:3]
 
-    def load_weights(self, tf_session, weights_path):
-        print("Reading pre-trained weights from {}".format(weights_path))
-        file_size = os.path.getsize(weights_path)
-        major, minor, revision = np.memmap(weights_path, shape=3, offset=0, dtype=np.int)
-        print("major, minor, revision: {}, {}, {}".format(major, minor, revision))
-
-        if (major * 10 + minor) >= 2 and major < 1000 and minor < 1000:
-            seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.float32)
-            offset = 20
-        else:
-            seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.int)
-            offset = 16
-
-        for layer in self.layers:
-            if type(layer) == conv2d:
-                offset += layer.load_weights(tf_session, offset, weights_path)
-        print("Weights loaded. ({}/{} read)".format(offset, file_size))
-        if offset != file_size:
-            print("(warning) Offset and file size do not match. Possibly an incorrect weights file.")
-
     def create_network(self):
-        _input = input_layer([None, 416, 416, 3], name="input")
+        layers = []
+        layers.append(input_layer([None, 416, 416, 3], "input"))
 
-        conv1 = conv2d(_input, 3, 3, 16, 1, batch_normalize=True)
-        act1 = leaky_relu(conv1)
-        pool1 = max_pool2d(act1, 2, 2, padding="VALID")
+        with tf.variable_scope("yolo"):
+            for filter_size, pool_stride in zip([16, 32, 64, 128, 256, 512], [2, 2, 2, 2, 2, 1]):
+                layers.append(conv2d_bn_act(layers[-1], filter_size, 3))
+                layers.append(max_pool2d(layers[-1], 2, stride=pool_stride))
 
-        conv2 = conv2d(pool1, 3, 3, 32, 1, batch_normalize=True)
-        act2 = leaky_relu(conv2)
-        pool2 = max_pool2d(act2, 2, 2, padding="VALID")
+            for _ in range(2):
+                layers.append(conv2d_bn_act(layers[-1], 1024, 3))
 
-        conv3 = conv2d(pool2, 3, 3, 64, 1, batch_normalize=True)
-        act3 = leaky_relu(conv3)
-        pool3 = max_pool2d(act3, 2, 2, padding="VALID")
+            layers.append(conv2d_bn_act(layers[-1], self.no_b * (5 + self.no_c), 1, 1,
+                                        use_batchnorm=False,
+                                        activation_fn="linear"))
 
-        conv4 = conv2d(pool3, 3, 3, 128, 1, batch_normalize=True)
-        act4 = leaky_relu(conv4)
-        pool4 = max_pool2d(act4, 2, 2, padding="VALID")
-
-        conv5 = conv2d(pool4, 3, 3, 256, 1, batch_normalize=True)
-        act5 = leaky_relu(conv5)
-        pool5 = max_pool2d(act5, 2, 2, padding="VALID")
-
-        conv6 = conv2d(pool5, 3, 3, 512, 1, batch_normalize=True)
-        act6 = leaky_relu(conv6)
-        pool6 = max_pool2d(act6, 2, 1, padding="SAME")
-
-        conv7 = conv2d(pool6, 3, 3, 1024, 1, batch_normalize=True)
-        act7 = leaky_relu(conv7)
-        conv8 = conv2d(act7, 3, 3, 1024, 1, batch_normalize=True)
-        act8 = leaky_relu(conv8)
-        conv9 = conv2d(act8, 1, 1, self.no_b * (5 + self.no_c), 1, batch_normalize=False)
-        conv9.out = tf.identity(conv9.out, "output")
-
-        layers = [_input, conv1, act1, pool1, conv2, act2, pool2, conv3, act3, pool3, conv4, act4, pool4, conv5, act5,
-                  pool5, conv6, act6, pool6, conv7, act7, conv8, act8, conv9]
-
-        layers[-1].out = tf.identity(layers[-1].out, name="output")
+            layers[-1] = tf.identity(layers[-1], "output")
         return layers
 
     def preprocess(self, img):
@@ -220,15 +211,17 @@ def _main(args):
         sess.run(tf.global_variables_initializer())
 
         # load pre-trained weights
-        yolo.load_weights(sess, VOC_WEIGHTS)
+        load_weights(sess, args.weights)
 
-        print("Test image: {}".format(args.img))
-        if args.img is None or (not os.path.exists(args.img)):
+        if args.image is None:
+            args.image = "./img/sample_dog.jpg"
+        print("Test image: {}".format(args.image))
+        if args.image is None or (not os.path.exists(args.image)):
             print("File does not exist.")
             return
 
         # predict
-        org_img = cv2.imread(args.img)
+        org_img = cv2.imread(args.image)
         img = yolo.predict(sess, org_img)
         cv2.imwrite("./out.jpg", img)
 
@@ -236,4 +229,6 @@ def _main(args):
 
 
 if __name__ == "__main__":
+    parser.add_argument("--weights", dest="weights", help="Path to weights file", default=VOC_WEIGHTS)
+    parser.add_argument("--image", dest="image", help="Test image")
     _main(parser.parse_args())

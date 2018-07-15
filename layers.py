@@ -1,7 +1,50 @@
-import numpy as np
 import tensorflow as tf
 
+slim = tf.contrib.slim
 
+# yolo defaults
+_BATCH_NORM_DECAY = 0.9
+_BATCH_NORM_EPSILON = 1e-5
+_LEAKY_RELU = 0.1
+
+
+def _pad(prev, kernel_size, mode="CONSTANT"):
+    pad_total = kernel_size - 1
+    pad_start = pad_total // 2
+    pad_end = pad_total - pad_start
+
+    return tf.pad(prev, [[0, 0], [pad_start, pad_end], [pad_start, pad_end], [0, 0]], mode=mode)
+
+
+def conv2d_bn_act(prev, filters, kernel_size, stride=1, use_batchnorm=True, activation_fn="leaky",
+                  is_training=True, reuse=False):
+    if stride > 1:
+        prev = _pad(prev, kernel_size)
+    padding = "SAME" if stride == 1 else "VALID"
+    out = slim.conv2d(prev, filters, kernel_size, stride=stride, padding=padding)
+
+    if use_batchnorm:
+        # out = tf.layers.batch_normalization(out, momentum=_BATCH_NORM_DECAY, epsilon=_BATCH_NORM_EPSILON)
+        out = slim.batch_norm(out, decay=_BATCH_NORM_DECAY, scale=False, epsilon=_BATCH_NORM_EPSILON,
+                              is_training=is_training)
+    if activation_fn == "leaky":
+        out = tf.nn.leaky_relu(out, alpha=_LEAKY_RELU)
+
+    return out
+
+
+def max_pool2d(prev, kernel_size, stride=2, reuse=False):
+    if stride > 1:
+        prev = _pad(prev, kernel_size)
+    padding = "SAME" if stride == 1 else "VALID"
+    return slim.max_pool2d(prev, kernel_size, stride, padding)
+
+
+def input_layer(shape, name):
+    return tf.placeholder(dtype=tf.float32, shape=shape, name=name)
+
+
+"""
 class conv2d(object):
     def __init__(self, prev_self, filter_h, filter_w, no_filters, stride, padding="SAME", batch_normalize=True):
         self.batch_normalize = batch_normalize
@@ -67,3 +110,4 @@ class max_pool2d(object):
 class input_layer(object):
     def __init__(self, shape, name="input"):
         self.out = tf.placeholder(dtype=tf.float32, shape=shape, name=name)
+"""

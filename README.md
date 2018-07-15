@@ -51,8 +51,8 @@ A pre-trained weights file can be downloaded [here](https://pjreddie.com/media/f
 
 ##### References
 I found the following projects/websites to be very helpful. Many thanks!
-- [Yolo](https://pjreddie.com/darknet/yolo/)
 - [Darknet](https://github.com/pjreddie/darknet/)
 - [YAD2K](https://github.com/allanzelener/YAD2K)
 - [Darkflow](https://github.com/thtrieu/darkflow/)
 - [MLBLR#yolov2](https://mlblr.com/includes/mlai/index.html#yolov2)
+- [Implementing YOLO v3 in Tensorflow(TF-Slim)](https://github.com/mystic123/tensorflow-yolo-v3)
