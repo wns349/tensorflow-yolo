@@ -3,6 +3,7 @@ import os
 
 import cv2
 import numpy as np
+
 from layers import *
 
 parser = argparse.ArgumentParser()
@@ -44,40 +45,6 @@ def iou_score(box1, box2):
     return intersect_area / union_area
 
 
-def load_weights(tf_session, weights_path):
-    print("Reading pre-trained weights from {}".format(weights_path))
-    file_size = os.path.getsize(weights_path)
-
-    major, minor, revision = np.memmap(weights_path, shape=3, offset=0, dtype=np.int)
-    print("major, minor, revision: {}, {}, {}".format(major, minor, revision))
-
-    if (major * 10 + minor) >= 2 and major < 1000 and minor < 1000:
-        seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.float32)
-        offset = 20
-    else:
-        seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.int)
-        offset = 16
-
-    for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="yolo"):
-
-        tokens = var.name.split("/")
-        size = np.prod(var.shape.as_list())
-        shape = var.shape.as_list()
-        if "weights" in tokens[-1]:
-            shape = [shape[3], shape[2], shape[0], shape[1]]
-        data = np.memmap(weights_path, shape=size, offset=offset, dtype=np.float32)
-        value = np.reshape(data, shape)
-        if "weights" in tokens[-1]:
-            value = np.transpose(value, (2, 3, 1, 0))
-        tf_session.run(var.assign(value))
-        print(value)
-        offset += size * 4
-
-    print("Weights loaded. ({}/{} read)".format(offset, file_size))
-    if offset != file_size:
-        print("(warning) Offset and file size do not match. Possibly an incorrect weights file.")
-
-
 class yolo_tiny(object):
     def __init__(self, anchors, labels, threshold=0.5, iou_threshold=0.5):
         self.anchors = anchors
@@ -89,9 +56,9 @@ class yolo_tiny(object):
 
         self.layers = self.create_network()
 
-        self.input = self.layers[0]
+        self.input = self.layers[0].out
         self.input_h, self.input_w = self.input.shape.as_list()[1:3]
-        self.output = self.layers[-1]
+        self.output = self.layers[-1].out
         self.output_h, self.output_w = self.output.shape.as_list()[1:3]
 
     def create_network(self):
@@ -100,18 +67,57 @@ class yolo_tiny(object):
 
         with tf.variable_scope("yolo"):
             for filter_size, pool_stride in zip([16, 32, 64, 128, 256, 512], [2, 2, 2, 2, 2, 1]):
-                layers.append(conv2d_bn_act(layers[-1], filter_size, 3))
-                layers.append(max_pool2d(layers[-1], 2, stride=pool_stride))
+                layers.append(conv2d_bn_act(layers[-1].out, filter_size, 3))
+                layers.append(max_pool2d(layers[-1].out, 2, stride=pool_stride))
 
             for _ in range(2):
-                layers.append(conv2d_bn_act(layers[-1], 1024, 3))
+                layers.append(conv2d_bn_act(layers[-1].out, 1024, 3))
 
-            layers.append(conv2d_bn_act(layers[-1], self.no_b * (5 + self.no_c), 1, 1,
-                                        use_batchnorm=False,
+            layers.append(conv2d_bn_act(layers[-1].out, self.no_b * (5 + self.no_c), 1, 1,
+                                        use_batch_normalization=False,
                                         activation_fn="linear"))
 
-            layers[-1] = tf.identity(layers[-1], "output")
+        layers[-1].out = tf.identity(layers[-1].out, "output")
         return layers
+
+    def load_weights(self, tf_session, weights_path):
+        print("Reading pre-trained weights from {}".format(weights_path))
+        file_size = os.path.getsize(weights_path)
+
+        major, minor, revision = np.memmap(weights_path, shape=3, offset=0, dtype=np.int)
+        print("major, minor, revision: {}, {}, {}".format(major, minor, revision))
+
+        if (major * 10 + minor) >= 2 and major < 1000 and minor < 1000:
+            seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.float32)
+            offset = 20
+        else:
+            seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.int)
+            offset = 16
+
+        variables = {v.op.name: v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="yolo")}
+
+        variable_names = []
+        for layer in self.layers:
+            variable_names.extend(layer.variable_names)
+
+        for variable_name in variable_names:
+            var = variables[variable_name]
+            tokens = var.name.split("/")
+            size = np.prod(var.shape.as_list())
+            shape = var.shape.as_list()
+            if "kernel" in tokens[-1]:
+                shape = [shape[3], shape[2], shape[0], shape[1]]
+            data = np.memmap(weights_path, shape=size, offset=offset, dtype=np.float32)
+            value = np.reshape(data, shape)
+            if "kernel" in tokens[-1]:
+                value = np.transpose(value, (2, 3, 1, 0))
+            tf_session.run(var.assign(value))
+            print(variable_name, "\n", value)
+            offset += size * 4
+
+        print("Weights loaded. ({}/{} read)".format(offset, file_size))
+        if offset != file_size:
+            print("(warning) Offset and file size do not match. Possibly an incorrect weights file.")
 
     def preprocess(self, img):
         imsz = cv2.resize(img, (self.input_h, self.input_w))
@@ -211,7 +217,7 @@ def _main(args):
         sess.run(tf.global_variables_initializer())
 
         # load pre-trained weights
-        load_weights(sess, args.weights)
+        yolo.load_weights(sess, args.weights)
 
         if args.image is None:
             args.image = "./img/sample_dog.jpg"
@@ -229,6 +235,7 @@ def _main(args):
 
 
 if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"]="-1"
     parser.add_argument("--weights", dest="weights", help="Path to weights file", default=VOC_WEIGHTS)
     parser.add_argument("--image", dest="image", help="Test image")
     _main(parser.parse_args())
