@@ -1,11 +1,13 @@
-# TF-Yolo
+# TensorFlow-Yolo
 Python + TensorFlow implementation of YOLO (You Only Look Once).
 
 ### Requirements
+Refer to `requirements.txt`
 - Python 3
 - Numpy
 - OpenCV
 - TensorFlow
+
 
 ### YOLO Networks
 
@@ -18,34 +20,30 @@ A pre-trained weights file can be downloaded [here](https://pjreddie.com/media/f
 1. Installation
 
     ```bash
-    $ git clone https://github.com/wns349/tf-yolo.git
+    $ git clone https://github.com/wns349/tensorflow-yolo
 
     # Install requirements. Hopefully, `pip` takes care of it all
-    $ pip install numpy
-    $ pip install tensorflow (or tensorflow-cpu)
-    $ pip install opencv-python
+    $ pip install -r requirements.txt
     ```
 
 
 2. Download pre-trained weights file
 
     Download it from [here](https://pjreddie.com/media/files/yolov2-tiny-voc.weights) and keep it under `/bin` directory.
-    Or, maybe a single `wget` command as follow:
-    ```bash
-    $ wget https://pjreddie.com/media/files/yolov2-tiny-voc.weights -P ./bin/
-    ```
 
 3. Run prediction
 
     ```bash
-    $ python ./yolo-tiny.py --img ./img/sample_dog.jpg
+    $ python ./main.py --image ./img/sample_dog.jpg
     ```
 
-    After a successful inference, a resulting image with bounding boxes is saved as `./out.jpg`.
+    After a successful inference, a resulting image with bounding boxes is saved as `./img/sample_dog_out.jpg`.
+
+    Checkout `main.py` to see a list of available command-line arguments.
 
 
 ### TODO
-- Generate yolo network at runtime
+- Full yolo network
 - Train custom objects for detection
 - Yolo v3
 
