@@ -17,7 +17,7 @@ def _pad(prev, kernel_size, mode="CONSTANT"):
 
 
 class conv2d_bn_act(object):
-    def __init__(self, net, filter_size, kernel_size, stride=1,
+    def __init__(self, prev, filter_size, kernel_size, stride=1,
                  use_batch_normalization=True,
                  activation_fn="leaky",
                  is_training=False):
@@ -36,9 +36,9 @@ class conv2d_bn_act(object):
             return x
 
         if stride > 1:
-            net = _pad(net, kernel_size)
+            prev = _pad(prev, kernel_size)
         padding = "SAME" if stride == 1 else "VALID"
-        self.out = slim.conv2d(net, filter_size, kernel_size,
+        self.out = slim.conv2d(prev, filter_size, kernel_size,
                                stride=stride,
                                padding=padding,
                                normalizer_fn=_batch_norm if use_batch_normalization else None,
@@ -55,11 +55,27 @@ class conv2d_bn_act(object):
 
 
 class max_pool2d(object):
-    def __init__(self, net, kernel_size, stride=2):
+    def __init__(self, prev, kernel_size, stride=2):
         if stride > 1:
-            net = _pad(net, kernel_size)
+            prev = _pad(prev, kernel_size)
         padding = "SAME" if stride == 1 else "VALID"
-        self.out = slim.max_pool2d(net, kernel_size, stride, padding)
+        self.out = slim.max_pool2d(prev, kernel_size, stride, padding)
+        self.variable_names = []
+
+
+class route(object):
+    def __init__(self, prevs):
+        self.out = tf.concat(prevs, axis=3)
+        self.variable_names = []
+
+
+class reorg(object):
+    def __init__(self, prev, stride):
+        self.out = tf.extract_image_patches(prev,
+                                            ksizes=[1, stride, stride, 1],
+                                            strides=[1, stride, stride, 1],
+                                            rates=[1] * 4,
+                                            padding="VALID")
         self.variable_names = []
 
 
