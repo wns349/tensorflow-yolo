@@ -79,7 +79,69 @@ class reorg(object):
         self.variable_names = []
 
 
+class shortcut(object):
+    def __init__(self, prev, shortcut_out):
+        self.out = prev + shortcut_out
+        self.variable_names = []
+
+
 class input_layer(object):
     def __init__(self, shape, name="input"):
         self.out = tf.placeholder(dtype=tf.float32, shape=shape, name=name)
+        self.variable_names = []
+
+
+class upsample(object):
+    def __init__(self, prev, stride):
+        h, w = prev.get_shape().as_list()[1:3]
+        self.out = tf.image.resize_nearest_neighbor(prev, (h * stride, w * stride))
+        self.variable_names = []
+
+
+class detection_layer(object):
+    def __init__(self, yolo_layers):
+        self.out = tf.concat(yolo_layers, axis=1)
+        self.variable_names = []
+
+
+class yolo_layer(object):
+    def __init__(self, prev, input_layer, no_c, sub_anchors):
+        input_h, input_w = input_layer.get_shape().as_list()[1:3]
+
+        out_shape = prev.get_shape().as_list()
+        grid_h, grid_w = out_shape[1:3]
+        dim = grid_h * grid_w
+        bbox_attrs = 5 + no_c
+
+        stride = (input_w // grid_w, input_h // grid_h)
+        anchors = [(sub_anchors[i] / stride[0], sub_anchors[i + 1] / stride[1]) for i in range(0, len(sub_anchors), 2)]
+        no_b = len(anchors)
+
+        self.out = tf.reshape(prev, [-1, no_b * dim, bbox_attrs])
+
+        box_xy, box_wh, prob_obj, prob_class = tf.split(self.out, [2, 2, 1, no_c], axis=-1)
+
+        box_xy = tf.nn.sigmoid(box_xy)
+        prob_obj = tf.nn.sigmoid(prob_obj)
+
+        grid_x = tf.range(grid_w, dtype=tf.float32)
+        grid_y = tf.range(grid_h, dtype=tf.float32)
+        a, b = tf.meshgrid(grid_x, grid_y)
+        x_offset = tf.reshape(a, [-1, 1])
+        y_offset = tf.reshape(b, [-1, 1])
+
+        xy_offset = tf.concat([x_offset, y_offset], axis=-1)
+        _t = tf.tile(xy_offset, [1, no_b])
+        xy_offset = tf.reshape(_t, [1, -1, 2])  # flatten
+
+        box_xy = box_xy + xy_offset
+        box_xy = box_xy * stride
+
+        anchors = tf.tile(anchors, [dim, 1])
+        box_wh = tf.exp(box_wh) * anchors
+        box_wh = box_wh * stride
+
+        detections = tf.concat([box_xy, box_wh, prob_obj], axis=-1)
+        classes = tf.nn.sigmoid(prob_class)
+        self.out = tf.concat([detections, classes], axis=-1)
         self.variable_names = []

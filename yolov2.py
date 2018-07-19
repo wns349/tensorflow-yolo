@@ -1,11 +1,10 @@
-import os
 import cv2
 import numpy as np
 import tensorflow as tf
 
-from layers import input_layer, conv2d_bn_act, max_pool2d, reorg, route
-
 from inference import preprocess, postprocess
+from layers import input_layer, conv2d_bn_act, max_pool2d, reorg, route
+from yolo import load_weights as _load_weights
 
 
 def create_full_network(anchors, labels, is_training=False, scope="yolo"):
@@ -82,41 +81,22 @@ def create_tiny_network(anchors, labels, is_training=False, scope="yolo"):
     return layers
 
 
-def load_weights(layers, tf_session, weights_path):
+def load_weights(layers, weights_path):
     print("Reading pre-trained weights from {}".format(weights_path))
-    file_size = os.path.getsize(weights_path)
 
-    major, minor, revision = np.memmap(weights_path, shape=3, offset=0, dtype=np.int)
-    print("major, minor, revision: {}, {}, {}".format(major, minor, revision))
+    # header
+    with open(weights_path, "rb") as f:
+        major, minor, revision = np.fromfile(f, count=3, dtype=np.int32)
+        print("major, minor, revision: {}, {}, {}".format(major, minor, revision))
 
-    if (major * 10 + minor) >= 2 and major < 1000 and minor < 1000:
-        seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.float32)
-        offset = 20
-    else:
-        seen = np.memmap(weights_path, shape=1, offset=12, dtype=np.int)
-        offset = 16
-    print("SEEN: ", seen)
+        if (major * 10 + minor) >= 2 and major < 1000 and minor < 1000:
+            seen = np.fromfile(f, count=1, dtype=np.float32)
+        else:
+            seen = np.fromfile(f, count=1, dtype=np.int32)
+        print("SEEN: ", seen)
+        weights = np.fromfile(f, dtype=np.float32)
 
-    variables = {v.op.name: v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="yolo")}
-    for layer in layers:
-        for variable_name in layer.variable_names:
-            var = variables[variable_name]
-            print("Loading pre-trained values for {}".format(var.name))
-            tokens = var.name.split("/")
-            size = np.prod(var.shape.as_list())
-            shape = var.shape.as_list()
-            if "weights" in tokens[-1]:
-                shape = [shape[3], shape[2], shape[0], shape[1]]
-            data = np.memmap(weights_path, shape=size, offset=offset, dtype=np.float32)
-            value = np.reshape(data, shape)
-            if "weights" in tokens[-1]:
-                value = np.transpose(value, (2, 3, 1, 0))
-            tf_session.run(var.assign(value))
-            offset += size * 4
-
-    print("Weights loaded. ({}/{} read)".format(offset, file_size))
-    if offset != file_size:
-        print("(warning) Offset and file size do not match. Possibly an incorrect weights file.")
+    return _load_weights(layers, weights)
 
 
 def predict(params):
@@ -141,7 +121,9 @@ def predict(params):
     # run prediction
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        weights_loader(layers, sess, weights)
+        ops = weights_loader(layers, weights)
+        print("Initializing weights...")
+        sess.run(ops)
 
         print("Test image: {}".format(test_image_path))
         img = cv2.imread(test_image_path)
