@@ -5,9 +5,8 @@ from layers import input_layer, conv2d_bn_act, route, shortcut, yolo_layer, upsa
 from yolo import load_weights as _load_weights
 
 
-def create_network(anchors, labels, is_training=False, scope="yolo"):
+def create_network(anchors, num_classes, is_training=False, scope="yolo"):
     no_b = len(anchors) // 2
-    no_c = len(labels)
 
     anchor_split = no_b // 3 * 2
 
@@ -48,12 +47,12 @@ def create_network(anchors, labels, is_training=False, scope="yolo"):
         for _ in range(3):
             layers.append(conv2d_bn_act(layers[-1].out, 512, 1))
             layers.append(conv2d_bn_act(layers[-1].out, 1024, 3))
-        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + no_c), 1, 1,
+        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
                                     is_training=is_training))
 
-        layers.append(yolo_layer(layers[-1].out, anchors[:anchor_split], len(labels)))
+        layers.append(yolo_layer(layers[-1].out, anchors[:anchor_split], num_classes))
         yolo_1 = layers[-1].out
 
         layers.append(route([layers[-4].out]))
@@ -63,12 +62,12 @@ def create_network(anchors, labels, is_training=False, scope="yolo"):
         for _ in range(3):
             layers.append(conv2d_bn_act(layers[-1].out, 256, 1))
             layers.append(conv2d_bn_act(layers[-1].out, 512, 3))
-        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + no_c), 1, 1,
+        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
                                     is_training=is_training))
 
-        layers.append(yolo_layer(layers[-1].out, anchors[anchor_split:2 * anchor_split], len(labels)))
+        layers.append(yolo_layer(layers[-1].out, anchors[anchor_split:2 * anchor_split], num_classes))
         yolo_2 = layers[-1].out
 
         layers.append(route([layers[-4].out]))
@@ -78,12 +77,12 @@ def create_network(anchors, labels, is_training=False, scope="yolo"):
         for _ in range(3):
             layers.append(conv2d_bn_act(layers[-1].out, 128, 1))
             layers.append(conv2d_bn_act(layers[-1].out, 256, 3))
-        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + no_c), 1, 1,
+        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
                                     is_training=is_training))
 
-        layers.append(yolo_layer(layers[-1].out, anchors[2 * anchor_split:], len(labels)))
+        layers.append(yolo_layer(layers[-1].out, anchors[2 * anchor_split:], num_classes))
         yolo_3 = layers[-1].out
         # END yolo
 
@@ -110,10 +109,10 @@ def load_weights(layers, weights_path):
 
 
 if __name__ == "__main__":
-    with open("./resource/voc.labels", "r") as f:
-        v_labels = [l.strip() for l in f.readlines()]
+    with open("./resource/voc.names", "r") as f:
+        v_class_names = [l.strip() for l in f.readlines()]
     v_anchors = [10, 13, 16, 30, 33, 23, 30, 61, 62, 45, 59, 119, 116, 90, 156, 198, 373, 326]
-    layers = create_network(v_anchors, v_labels)
+    layers = create_network(v_anchors, v_class_names)
     for i, l in enumerate(layers):
         print(i, l.out)
 
