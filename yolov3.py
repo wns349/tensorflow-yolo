@@ -53,7 +53,7 @@ def create_network(anchors, labels, is_training=False, scope="yolo"):
                                     activation_fn="linear",
                                     is_training=is_training))
 
-        layers.append(yolo_layer(layers[-1].out, layers[0].out, len(labels), anchors[:anchor_split]))
+        layers.append(yolo_layer(layers[-1].out, anchors[:anchor_split], len(labels)))
         yolo_1 = layers[-1].out
 
         layers.append(route([layers[-4].out]))
@@ -68,7 +68,7 @@ def create_network(anchors, labels, is_training=False, scope="yolo"):
                                     activation_fn="linear",
                                     is_training=is_training))
 
-        layers.append(yolo_layer(layers[-1].out, layers[0].out, len(labels), anchors[anchor_split:2 * anchor_split]))
+        layers.append(yolo_layer(layers[-1].out, anchors[anchor_split:2 * anchor_split], len(labels)))
         yolo_2 = layers[-1].out
 
         layers.append(route([layers[-4].out]))
@@ -83,7 +83,7 @@ def create_network(anchors, labels, is_training=False, scope="yolo"):
                                     activation_fn="linear",
                                     is_training=is_training))
 
-        layers.append(yolo_layer(layers[-1].out, layers[0].out, len(labels), anchors[2 * anchor_split:]))
+        layers.append(yolo_layer(layers[-1].out, anchors[2 * anchor_split:], len(labels)))
         yolo_3 = layers[-1].out
         # END yolo
 

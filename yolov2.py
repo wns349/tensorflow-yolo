@@ -7,10 +7,7 @@ from layers import input_layer, conv2d_bn_act, max_pool2d, reorg, route
 from yolo import load_weights as _load_weights
 
 
-def create_full_network(anchors, labels, is_training=False, scope="yolo"):
-    no_b = len(anchors) // 2
-    no_c = len(labels)
-
+def create_full_network(num_anchors, num_classes, is_training=False, scope="yolo"):
     layers = []
     with tf.variable_scope(scope):
         layers.append(input_layer([None, 416, 416, 3], "input"))
@@ -46,7 +43,7 @@ def create_full_network(anchors, labels, is_training=False, scope="yolo"):
         layers.append(route([layers[-1].out, layers[-4].out]))
         layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training))
 
-        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + no_c), 1, 1,
+        layers.append(conv2d_bn_act(layers[-1].out, num_anchors * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
                                     is_training=is_training))
@@ -56,10 +53,7 @@ def create_full_network(anchors, labels, is_training=False, scope="yolo"):
     return layers
 
 
-def create_tiny_network(anchors, labels, is_training=False, scope="yolo"):
-    no_b = len(anchors) // 2
-    no_c = len(labels)
-
+def create_tiny_network(num_anchors, num_classes, is_training=False, scope="yolo"):
     layers = []
     with tf.variable_scope(scope):
         layers.append(input_layer([None, 416, 416, 3], "input"))
@@ -71,7 +65,7 @@ def create_tiny_network(anchors, labels, is_training=False, scope="yolo"):
         for _ in range(2):
             layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, is_training=is_training))
 
-        layers.append(conv2d_bn_act(layers[-1].out, no_b * (5 + no_c), 1, 1,
+        layers.append(conv2d_bn_act(layers[-1].out, num_anchors * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
                                     is_training=is_training))
@@ -102,7 +96,7 @@ def load_weights(layers, weights_path):
 def predict(params):
     test_image_path = params["test_image"]
     anchors = params["anchors"]
-    labels = params["labels"]
+    class_names = params["class_names"]
     weights = params["weights"]
     threshold = float(params["threshold"])
     iou_threshold = float(params["iou_threshold"])
@@ -112,7 +106,7 @@ def predict(params):
     cb = params["result_callback"] if "result_callback" in params else None
 
     # create network
-    layers = builder(anchors, labels, False, scope)
+    layers = builder(anchors, class_names, False, scope)
     layer_in = layers[0].out
     layer_in_h, layer_in_w = layer_in.shape.as_list()[1:3]
     layer_out = layers[-1].out
@@ -131,10 +125,116 @@ def predict(params):
         net_img = np.expand_dims(net_img, axis=0)  # since only a single image is evaluated here
 
         net_out = sess.run(layer_out, feed_dict={layer_in: net_img})
-        net_out = np.reshape(net_out, [-1, layer_out_h, layer_out_w, len(anchors) // 2, 5 + len(labels)])
+        net_out = np.reshape(net_out, [-1, layer_out_h, layer_out_w, len(anchors) // 2, 5 + len(class_names)])
 
         results = postprocess(net_out, anchors, threshold, iou_threshold, layer_out_h, layer_out_w)
         result = results[0]  # only a single image
 
         if cb is not None:
             cb(result)
+
+
+def create_loss_function(pred, batch_size, pred_h, pred_w, anchors, num_classes):
+    no_b = len(anchors) // 2
+
+    # reshape to [N, H, W, B, x,y,w,h,p(obj),C]
+    pred = tf.reshape(pred, [-1, pred_h, pred_w, no_b, 5 + num_classes])
+
+    # x, y prediction
+    tile = tf.to_float(tf.tile(tf.range(pred_w), [pred_h]))  # make H x W tile
+    cell_x = tf.reshape(tile, [1, pred_h, pred_w, 1, 1])  # [N, H, W, B, C]
+    cell_y = tf.transpose(cell_x, [0, 2, 1, 3, 4])  # Flip H, W
+    cell_xy = tf.concat([cell_x, cell_y], axis=-1)  # [1, H, W, 1, 2]
+    cell_xy = tf.tile(cell_xy, [batch_size, 1, 1, no_b, 1])
+    pred_xy = tf.sigmoid(pred[..., 0:2]) + cell_xy  # bx, by in paper
+
+    # w, h prediction
+    reshaped_anchors = np.reshape(anchors, [1, 1, 1, no_b, 2])
+    pred_wh = reshaped_anchors * tf.exp(pred[..., 2:4])  # bw, bh in paper
+
+    # objectness prediction
+    pred_obj = tf.sigmoid(pred[..., 4])  # Pr(object) * IOU(b, object)
+    pred_obj = tf.expand_dims(pred_obj, axis=-1)
+
+    # class prediction
+    pred_class = pred[..., 5:]
+    # ----
+    # create placeholders for ground truth
+    truth = tf.placeholder(tf.float32, [None, pred_h, pred_w, no_b, 5 + num_classes])
+
+    # x, y truth
+    true_xy = truth[..., 0:2]
+
+    # w, h truth
+    true_wh = truth[..., 2:4]
+
+    # objectness truth = IOU(pred, truth)
+    truth_min = true_xy - true_wh / 2.
+    truth_max = true_xy + true_wh / 2.
+    truth_area = true_wh[..., 0] * true_wh[..., 1]
+    pred_min = pred_xy - pred_wh / 2.
+    pred_max = pred_xy + pred_wh / 2.
+    pred_area = pred_wh[..., 0] * pred_wh[..., 1]
+    intersection_min = tf.maximum(truth_min, pred_min)
+    intersection_max = tf.minimum(truth_max, pred_max)
+    intersection_wh = tf.maximum(intersection_max - intersection_min, 0.)
+    intersection_area = intersection_wh[..., 0] * intersection_wh[..., 1]
+    union_area = truth_area + pred_area - intersection_area
+    true_obj = truth[..., 4] * tf.truediv(intersection_area, union_area)  # Pr(object) * IOU(pred, truth)
+    true_obj = tf.expand_dims(true_obj, axis=-1)
+
+    # class truth
+    true_class = tf.argmax(truth[..., 5:], axis=-1)
+    # ----
+    # create mask placeholder
+    mask_obj = tf.placeholder(tf.float32, [None, pred_h, pred_w, no_b])
+    mask_noobj = tf.placeholder(tf.float32, [None, pred_h, pred_w, no_b])
+
+    mask_obj = tf.expand_dims(mask_obj, axis=-1)  # [N, H, W, B, 1]
+    mask_noobj = tf.expand_dims(mask_noobj, axis=-1)  # [N, H, W, B, 1]
+
+    # ---
+    # calculate loss
+    lambda_coord = 5.
+    lambda_noobj = .5
+    loss_xy = lambda_coord * tf.reduce_sum(tf.square(true_xy - pred_xy) * mask_obj) / batch_size
+    loss_wh = lambda_coord * tf.reduce_sum(tf.square(tf.sqrt(true_wh) - tf.sqrt(pred_wh)) * mask_obj) / batch_size
+    loss_obj = tf.reduce_sum(tf.square(true_obj - pred_obj) * mask_obj) / batch_size
+    loss_noobj = lambda_noobj * tf.reduce_sum(tf.square(true_obj - pred_obj) * mask_noobj) / batch_size
+    softmax_class = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=true_class, logits=pred_class)
+    loss_class = tf.reduce_sum(lambda_coord * softmax_class) / batch_size
+
+    loss = (loss_xy + loss_wh + loss_obj + loss_noobj + loss_class)
+
+    # tensorboard
+    with tf.name_scope("losses"):
+        tf.summary.scalar("loss_xy", loss_xy)
+        tf.summary.scalar("loss_wh", loss_wh)
+        tf.summary.scalar("loss_obj", loss_obj)
+        tf.summary.scalar("loss_noobj", loss_noobj)
+        tf.summary.scalar("loss_class", loss_class)
+
+    # Make placeholder for ground truth
+    placeholders = {
+        "ground_truth": truth,
+        "ground_truth_mask_obj": mask_obj,
+        "ground_truth_mask_noobj": mask_noobj
+    }
+    return loss, placeholders
+
+
+if __name__ == "__main__":
+    with open("./resource/voc.names", "r") as f:
+        v_names = [l.strip() for l in f.readlines()]
+    with open("./resource/yolov2-coco.anchors", "r") as f:
+        v_anchors = [float(t) for t in f.readline().split(",")]
+    layers = create_full_network(v_anchors, v_names)
+    net_out = layers[-1].out
+    net_h, net_w = net_out.get_shape().as_list()[1:3]
+    loss, placeholders = create_loss_function(net_out, 1, net_h, net_w, v_anchors, v_names)
+
+    # ops = load_weights(layers, "./bin/yolov2.weights")
+    # with tf.Session() as sess:
+    #     sess.run(ops)
+    print(loss, placeholders)
+    print("Done!")
