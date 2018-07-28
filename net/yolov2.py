@@ -71,9 +71,38 @@ def load_weights(layers, weights_path):
     return yolo.load_weights(layers, weights)
 
 
+def find_bounding_boxes(out, anchors, threshold):
+    h, w = out.shape[0:2]
+    no_b = len(anchors)
+    bboxes = []
+    # TODO: maybe use matrix operation instead of for loops?
+    for cy in range(h):
+        for cw in range(w):
+            for b in range(no_b):
+                # calculate p(class|obj)
+                prob_obj = yolo.sigmoid(out[cy, cw, b, 4])
+                prob_classes = yolo.softmax(out[cy, cw, b, 5:])
+                class_idx = np.argmax(prob_classes)
+                class_prob = prob_classes[class_idx]
+                p = prob_obj * class_prob
+                if p < threshold:  # if lower than threshold, pass
+                    continue
+
+                coords = out[cy, cw, b, 0:4]
+                bbox = yolo.BoundingBox()
+                bbox.x = (yolo.sigmoid(coords[0]) + cw) / w
+                bbox.y = (yolo.sigmoid(coords[1]) + cy) / h
+                bbox.w = (anchors[b][0] * np.exp(coords[2])) / w
+                bbox.h = (anchors[b][1] * np.exp(coords[3])) / h
+                bbox.class_idx = class_idx
+                bbox.prob = p
+                bboxes.append(bbox)
+    return bboxes
+
+
 class YoloV2(yolo.Yolo):
     def __init__(self):
-        super(yolo.Yolo, self).__init__()
+        super().__init__()
 
     def initialize(self, params, is_training):
         assert "anchors" in params and isinstance(params["anchors"], list)
@@ -132,7 +161,7 @@ class YoloV2(yolo.Yolo):
         out_shape = net_out.shape
         net_out = np.reshape(net_out, [-1, out_shape[1], out_shape[2], len(self.anchors), (5 + len(self.names))])
         for out in net_out:
-            bounding_boxes = yolo.find_bounding_boxes(out, self.anchors, threshold)
+            bounding_boxes = find_bounding_boxes(out, self.anchors, threshold)
             results.append(yolo.non_maximum_suppression(bounding_boxes, iou_threshold))
         return results
 

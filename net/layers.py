@@ -111,7 +111,7 @@ class yolo_layer(object):
         out_shape = prev.get_shape().as_list()
         self.h, self.w = out_shape[1:3]
         stride = (input_shape[0] / self.h, input_shape[1] / self.w)
-        self.anchors = [(a[0] / stride[1], a[1] / stride[0]) for a in sub_anchors]  # anchor is in (w, h)
+        self.anchors = [(a[0] / stride[0], a[1] / stride[1]) for a in sub_anchors]  # anchor is in (w, h)
         self.b = len(self.anchors)
         self.out = tf.reshape(prev, [-1, self.h * self.w * self.b, 5 + no_c])
         self.variable_names = []

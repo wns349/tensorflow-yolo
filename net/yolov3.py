@@ -1,9 +1,10 @@
+import os
+
 import numpy as np
 import tensorflow as tf
 
 from . import yolo
 from .layers import conv2d_bn_act, input_layer, route, detection_layer, yolo_layer, shortcut, upsample
-import os
 
 
 def create_network(anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
@@ -28,12 +29,10 @@ def create_network(anchors, num_classes, is_training, scope="yolo", input_shape=
         layers.append(conv2d_bn_act(layers[-1].out, 256, 3, 2, is_training=is_training))
         for _ in range(8):
             _conv_shortcut(128)
-        print("ROUTE1: ", layers[-1].out)
         layers.append(conv2d_bn_act(layers[-1].out, 512, 3, 2, is_training=is_training))
         for _ in range(8):
             _conv_shortcut(256)
 
-        print("ROUTE2: ", layers[-1].out)
         layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, 2, is_training=is_training))
         for _ in range(4):
             _conv_shortcut(512)
@@ -108,6 +107,7 @@ def find_bounding_boxes(out, anchors, threshold):
     h, w = out.shape[0:2]
     no_b = len(anchors)
     bboxes = []
+
     # TODO: maybe use matrix operation instead of for loops?
     for cy in range(h):
         for cw in range(w):
@@ -128,14 +128,14 @@ def find_bounding_boxes(out, anchors, threshold):
                 bbox.w = (anchors[b][0] * np.exp(coords[2])) / w
                 bbox.h = (anchors[b][1] * np.exp(coords[3])) / h
                 bbox.class_idx = class_idx
-                bbox.prob = class_prob
+                bbox.prob = prob_obj
                 bboxes.append(bbox)
     return bboxes
 
 
 class YoloV3(yolo.Yolo):
     def __init__(self):
-        super(yolo.Yolo, self).__init__()
+        super().__init__()
 
     def initialize(self, params, is_training):
         assert "anchors" in params and isinstance(params["anchors"], list)
@@ -206,10 +206,12 @@ class YoloV3(yolo.Yolo):
 
 
 if __name__ == "__main__":
+    with open("./resource/coco.names", "r") as f:
+        class_names = [n.lstrip().rstrip() for n in f.readlines()]
     o = YoloV3()
     o.initialize({
         "anchors": [10, 13, 16, 30, 33, 23, 30, 61, 62, 45, 59, 119, 116, 90, 156, 198, 373, 326],
-        "names": [str(i) for i in range(80)]
+        "names": class_names
     }, False)
     o.predict("./img/", "./out/", 0.5, 0.5, 1, "./bin/yolov3.weights")
 

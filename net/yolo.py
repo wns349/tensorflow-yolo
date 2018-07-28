@@ -87,35 +87,6 @@ def iou_score(box1, box2):
     return intersect_area / union_area
 
 
-def find_bounding_boxes(out, anchors, threshold):
-    h, w = out.shape[0:2]
-    no_b = len(anchors)
-    bboxes = []
-    # TODO: maybe use matrix operation instead of for loops?
-    for cy in range(h):
-        for cw in range(w):
-            for b in range(no_b):
-                # calculate p(class|obj)
-                prob_obj = sigmoid(out[cy, cw, b, 4])
-                prob_classes = softmax(out[cy, cw, b, 5:])
-                class_idx = np.argmax(prob_classes)
-                class_prob = prob_classes[class_idx]
-                p = prob_obj * class_prob
-                if p < threshold:  # if lower than threshold, pass
-                    continue
-
-                coords = out[cy, cw, b, 0:4]
-                bbox = BoundingBox()
-                bbox.x = (sigmoid(coords[0]) + cw) / w
-                bbox.y = (sigmoid(coords[1]) + cy) / h
-                bbox.w = (anchors[b][0] * np.exp(coords[2])) / w
-                bbox.h = (anchors[b][1] * np.exp(coords[3])) / h
-                bbox.class_idx = class_idx
-                bbox.prob = p
-                bboxes.append(bbox)
-    return bboxes
-
-
 def non_maximum_suppression(boxes, iou_threshold):
     if len(boxes) == 0:
         return []
