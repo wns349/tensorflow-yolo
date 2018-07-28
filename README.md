@@ -34,17 +34,14 @@ A pre-trained weights file can be downloaded [here](https://pjreddie.com/media/f
 3. Run prediction
 
     ```bash
-    $ python ./main.py --image ./img/sample_dog.jpg --weights ./bin/yolov2.weights --labels ./resource/coco.labels --anchors ./resource/yolov2-coco.anchors --network yolov2
+    $ python ./predict.py --img_dir ./img --out_dir ./out --weights ./bin/yolov2.weights --names ./resource/coco.names --anchors ./resource/yolov2-coco.anchors --network v2 --threshold 0.5 --iou_threshold 0.5
     ```
 
-    After a successful inference, a resulting image with bounding boxes is saved as `./img/sample_dog_out.jpg`.
-
-    Checkout `main.py` to see a list of available command-line arguments.
+    After a successful inference, a resulting image with bounding boxes is saved as `./out`.
 
 
 ### TODO
 - Train custom objects for detection
-- Yolo v3
 
 ##### References
 I found the following projects/websites to be very helpful. Many thanks!
