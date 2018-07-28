@@ -2,8 +2,8 @@ import numpy as np
 import tensorflow as tf
 import os
 
-from net.layers import conv2d_bn_act, input_layer, max_pool2d, route, reorg
-from net import yolo
+from .layers import conv2d_bn_act, input_layer, max_pool2d, route, reorg
+from . import yolo
 
 
 def create_full_network(num_anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
@@ -112,7 +112,29 @@ class YoloV2(yolo.Yolo):
                 pass
 
             # run prediction
-            yolo.generate_test_batch(test_img_paths, batch_size)
+            input_shape = tuple(self.net[0].out.get_shape().as_list()[1:3])
+
+            test_batches = yolo.generate_test_batch(test_img_paths, batch_size, input_shape)
+            for x_batch, paths in test_batches:
+                net_out = sess.run(self.net[-1].out, feed_dict={self.net[0].out: x_batch})
+                net_boxes = self.postprocess(net_out, threshold, iou_threshold)
+                for boxes, path in zip(net_boxes, paths):
+                    # draw box on image
+                    new_img = yolo.draw_boxes(path, boxes, self.names)
+                    # write to file
+                    file_name, file_ext = os.path.splitext(os.path.basename(path))
+                    out_path = os.path.join(out_dir, "{}_out{}".format(file_name, file_ext))
+                    yolo.save_image(new_img, out_path)
+                    print("{}: Found {} objects. Saved to {}".format(file_name, len(boxes), out_path))
+
+    def postprocess(self, net_out, threshold, iou_threshold):
+        results = []
+        out_shape = net_out.shape
+        net_out = np.reshape(net_out, [-1, out_shape[1], out_shape[2], len(self.anchors), (5 + len(self.names))])
+        for out in net_out:
+            bounding_boxes = yolo.find_bounding_boxes(out, self.anchors, threshold)
+            results.append(yolo.non_maximum_suppression(bounding_boxes, iou_threshold))
+        return results
 
 
 if __name__ == "__main__":
@@ -121,6 +143,6 @@ if __name__ == "__main__":
         "anchors": [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828],
         "names": [str(i) for i in range(80)]
     }, False)
-    o.predict("./img/", "./out/", 0.5, 0.5, 1, "./bin/yolov2.weights")
+    o.predict("./img/", "./out/", 0.5, 0.5, 2, "./bin/yolov2.weights")
 
     print("Done")
