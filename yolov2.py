@@ -3,7 +3,7 @@ import numpy as np
 import tensorflow as tf
 
 from inference import preprocess, postprocess
-from layers import input_layer, conv2d_bn_act, max_pool2d, reorg, route
+from net.layers import input_layer, conv2d_bn_act, max_pool2d, reorg, route
 from yolo import load_weights as _load_weights
 
 

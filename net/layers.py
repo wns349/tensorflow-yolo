@@ -44,7 +44,7 @@ class conv2d_bn_act(object):
                                normalizer_fn=_batch_norm if use_batch_normalization else None,
                                activation_fn=_activation_fn)
 
-        # variable names in order to read darknet's pre-trained weights
+        # order variable names in sequence to match darknet's pre-trained weights
         variable_prefix = self.out.name.rsplit("/", 1)[0]
         self.variable_names = ["{}/biases".format(variable_prefix)]
         if use_batch_normalization:
@@ -106,8 +106,9 @@ class detection_layer(object):
 
 class yolo_layer(object):
     def __init__(self, prev, sub_anchors, no_c):
-        no_b = len(sub_anchors) // 2
         out_shape = prev.get_shape().as_list()
+        self.h, self.w = out_shape[1:3]
+        self.b = len(sub_anchors)
         self.anchors = sub_anchors
-        self.out = tf.reshape(prev, [-1, out_shape[1], out_shape[2], no_b, no_c])
+        self.out = tf.reshape(prev, [-1, self.h * self.w * self.no_b, 5 + no_c])
         self.variable_names = []
