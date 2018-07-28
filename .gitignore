@@ -2,7 +2,4 @@
 .pyc
 bin/*
 out/*
-**/__pycache__/*
-**/.ipynb_checkpoints/*
-**/*.pyc
-.DS_Store
+__pycache__/*
