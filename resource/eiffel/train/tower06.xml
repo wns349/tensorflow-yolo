@@ -1,0 +1,26 @@
+<annotation>
+	<folder>train</folder>
+	<filename>tower06.jpg</filename>
+	<path>D:\workspace\tf-yolo\resource\eiffel\train\tower06.jpg</path>
+	<source>
+		<database>Unknown</database>
+	</source>
+	<size>
+		<width>946</width>
+		<height>585</height>
+		<depth>3</depth>
+	</size>
+	<segmented>0</segmented>
+	<object>
+		<name>tower</name>
+		<pose>Unspecified</pose>
+		<truncated>1</truncated>
+		<difficult>0</difficult>
+		<bndbox>
+			<xmin>379</xmin>
+			<ymin>1</ymin>
+			<xmax>563</xmax>
+			<ymax>450</ymax>
+		</bndbox>
+	</object>
+</annotation>

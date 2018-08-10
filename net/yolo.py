@@ -1,8 +1,10 @@
 import os
+import xml.etree.ElementTree as ET
 
+import re
+import cv2
 import numpy as np
 import tensorflow as tf
-import cv2
 
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 255, 0), (255, 0, 255)]
 
@@ -37,17 +39,51 @@ def load_image_paths(path_to_img_dir):
             if any(f.lower().endswith(ext) for ext in ["jpg", "bmp", "png", "gif"])]
 
 
+def parse_annotations(annotation_dir, image_dir):
+    annotations = [os.path.join(os.path.abspath(annotation_dir), f) for f in os.listdir(annotation_dir)
+                   if f.lower().endswith(".xml")]
+
+    result = []
+    for annotation in annotations:
+        root = ET.parse(annotation).getroot()
+        img_path = os.path.join(image_dir, root.find("filename").text)
+
+        img_objects = []
+        objects = root.findall("object")
+        for object in objects:
+            name = object.find("name").text
+            bndbox = object.find("bndbox")
+            x1 = int(bndbox.find("xmin").text)
+            y1 = int(bndbox.find("ymin").text)
+            x2 = int(bndbox.find("xmax").text)
+            y2 = int(bndbox.find("ymax").text)
+            img_objects.append((x1, y1, x2, y2, name))
+
+        result.append((img_path, img_objects))
+    return result
+
+
 def preprocess_image(image_path, new_shape, objects=None):
     image = cv2.imread(image_path)
     if image is None:
         print("Failed to read {}".format(image_path))
         return
 
-    # TODO: handle objects for training
     image = cv2.resize(image, new_shape)
     image = image / 255.  # normalize to 0 - 1
     image = image[:, :, ::-1]  # BGR to RGB
-    return image, objects
+
+    new_objects = None
+    if objects is not None:
+        new_objects = []
+        for obj in objects:
+            xmin = obj[0] / image.shape[1] * new_shape[1]  # xmin
+            ymin = obj[1] / image.shape[0] * new_shape[0]  # ymin
+            xmax = obj[2] / image.shape[1] * new_shape[1]  # xmin
+            ymax = obj[3] / image.shape[0] * new_shape[0]  # ymin
+            new_objects.append((xmin, ymin, xmax, ymax, obj[4]))
+
+    return image, new_objects
 
 
 def generate_test_batch(img_paths, batch_size, input_shape):
@@ -125,14 +161,36 @@ def save_image(image, out_path):
     cv2.imwrite(out_path, image)
 
 
+def load_checkpoint(saver, sess, checkpoint_dir):
+    metas = [f for f in os.listdir(checkpoint_dir) if f.startswith("yolo")]
+
+    if len(metas) == 0:
+        return 0
+
+    metas.sort(reverse=True)
+    checkpoint_path = os.path.join(checkpoint_dir, metas[0])
+    name = os.path.splitext(checkpoint_path)[0]
+    step = int(name.split("-")[1])
+    saver.restore(sess, checkpoint_path)
+    return step
+
+
+def save_checkpoint(saver, sess, checkpoint_dir, step):
+    out_path = os.path.join(checkpoint_dir, "yolo-{}.ckpt".format(step))
+    saver.save(sess, out_path)
+    print("Checkpoint saved to {}".format(out_path))
+
+
 class BoundingBox(object):
-    def __init__(self, x=float(), y=float(), w=float(), h=float()):
+    def __init__(self, x=0., y=0., w=0., h=0., cx=0, cy=0, class_idx=-1, prob=-1.):
         self.x = x
         self.y = y
         self.w = w
         self.h = h
-        self.class_idx = -1
-        self.prob = 0
+        self.cx = cx
+        self.cy = cy
+        self.class_idx = class_idx
+        self.prob = prob
 
     def get_top_left(self, h=1., w=1.):
         return np.maximum((self.x - self.w / 2.) * w, 0.), np.maximum((self.y - self.h / 2.) * h, 0.)
