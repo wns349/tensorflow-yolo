@@ -12,70 +12,73 @@ def create_network(anchors, num_classes, is_training, scope="yolo", input_shape=
     layers = []
 
     def _conv_shortcut(filter_size):
-        layers.append(conv2d_bn_act(layers[-1].out, filter_size, 1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, filter_size * 2, 3, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, filter_size, 1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, filter_size * 2, 3, is_training=is_training, scope=scope))
         layers.append(shortcut(layers[-1].out, layers[-3].out))
 
     with tf.variable_scope(scope):
         layers.append(input_layer([None, input_shape[0], input_shape[1], input_shape[2]], "input"))
 
         # START darknet53
-        layers.append(conv2d_bn_act(layers[-1].out, 32, 3, 1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 64, 3, 2, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 32, 3, 1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 64, 3, 2, is_training=is_training, scope=scope))
         _conv_shortcut(32)
-        layers.append(conv2d_bn_act(layers[-1].out, 128, 3, 2, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 128, 3, 2, is_training=is_training, scope=scope))
         for _ in range(2):
             _conv_shortcut(64)
-        layers.append(conv2d_bn_act(layers[-1].out, 256, 3, 2, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 256, 3, 2, is_training=is_training, scope=scope))
         for _ in range(8):
             _conv_shortcut(128)
-        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, 2, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, 2, is_training=is_training, scope=scope))
         for _ in range(8):
             _conv_shortcut(256)
 
-        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, 2, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, 2, is_training=is_training, scope=scope))
         for _ in range(4):
             _conv_shortcut(512)
         # END darknet53
 
         # START yolo
         for _ in range(3):
-            layers.append(conv2d_bn_act(layers[-1].out, 512, 1, is_training=is_training))
-            layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, is_training=is_training))
+            layers.append(conv2d_bn_act(layers[-1].out, 512, 1, is_training=is_training, scope=scope))
+            layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, is_training=is_training, scope=scope))
         layers.append(conv2d_bn_act(layers[-1].out, len(anchors[0]) * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
-                                    is_training=is_training))
+                                    is_training=is_training,
+                                    scope=scope))
 
         layers.append(yolo_layer(layers[-1].out, anchors[0], num_classes, input_shape))
         yolo_1 = layers[-1]
 
         layers.append(route([layers[-4].out]))
-        layers.append(conv2d_bn_act(layers[-1].out, 256, 1, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 256, 1, is_training=is_training, scope=scope))
         layers.append(upsample(layers[-1].out, 2))
         layers.append(route([layers[-1].out, layers[61 + 1].out]))  # since input layer is included
         for _ in range(3):
-            layers.append(conv2d_bn_act(layers[-1].out, 256, 1, is_training=is_training))
-            layers.append(conv2d_bn_act(layers[-1].out, 512, 3, is_training=is_training))
+            layers.append(conv2d_bn_act(layers[-1].out, 256, 1, is_training=is_training, scope=scope))
+            layers.append(conv2d_bn_act(layers[-1].out, 512, 3, is_training=is_training, scope=scope))
         layers.append(conv2d_bn_act(layers[-1].out, len(anchors[1]) * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
-                                    is_training=is_training))
+                                    is_training=is_training,
+                                    scope=scope))
 
         layers.append(yolo_layer(layers[-1].out, anchors[1], num_classes, input_shape))
         yolo_2 = layers[-1]
 
         layers.append(route([layers[-4].out]))
-        layers.append(conv2d_bn_act(layers[-1].out, 128, 1, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 128, 1, is_training=is_training, scope=scope))
         layers.append(upsample(layers[-1].out, 2))
         layers.append(route([layers[-1].out, layers[36 + 1].out]))  # since input layer is included
         for _ in range(3):
-            layers.append(conv2d_bn_act(layers[-1].out, 128, 1, is_training=is_training))
-            layers.append(conv2d_bn_act(layers[-1].out, 256, 3, is_training=is_training))
+            layers.append(conv2d_bn_act(layers[-1].out, 128, 1, is_training=is_training, scope=scope))
+            layers.append(conv2d_bn_act(layers[-1].out, 256, 3, is_training=is_training, scope=scope))
         layers.append(conv2d_bn_act(layers[-1].out, len(anchors[2]) * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
-                                    is_training=is_training))
+                                    is_training=is_training,
+                                    scope=scope))
 
         layers.append(yolo_layer(layers[-1].out, anchors[2], num_classes, input_shape))
         yolo_3 = layers[-1]

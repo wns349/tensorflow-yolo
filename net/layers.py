@@ -1,7 +1,5 @@
 import tensorflow as tf
 
-slim = tf.contrib.slim
-
 # yolo defaults
 _BATCH_NORM_DECAY = 0.9
 _BATCH_NORM_EPSILON = 1e-5
@@ -17,42 +15,52 @@ def _pad(prev, kernel_size, mode="CONSTANT"):
 
 
 class conv2d_bn_act(object):
+    name_count = 0
+
     def __init__(self, prev, filter_size, kernel_size, stride=1,
                  use_batch_normalization=True,
                  activation_fn="leaky",
-                 is_training=False):
-
-        def _activation_fn(x):  # activation layer
-            if activation_fn == "leaky":
-                return tf.nn.leaky_relu(x, alpha=_LEAKY_RELU)
-            else:
-                return x
-
-        def _batch_norm(x):  # batch normalization layer
-            x = slim.batch_norm(x, decay=_BATCH_NORM_DECAY, epsilon=_BATCH_NORM_EPSILON, scale=True,
-                                fused=None, is_training=is_training)
-            return x
+                 is_training=False,
+                 scope="yolo"):
+        name = "{}_{}".format(conv2d_bn_act.__name__, conv2d_bn_act.name_count)
+        conv2d_bn_act.name_count += 1
 
         if stride > 1:
             prev = _pad(prev, kernel_size)
         padding = "SAME" if stride == 1 else "VALID"
-        self.out = slim.conv2d(prev, filter_size, kernel_size,
-                               stride=stride,
-                               padding=padding,
-                               normalizer_fn=_batch_norm if use_batch_normalization else None,
-                               activation_fn=_activation_fn)
+        self.out = tf.layers.conv2d(
+            inputs=prev,
+            filters=filter_size,
+            kernel_size=kernel_size,
+            padding=padding,
+            strides=(stride, stride),
+            use_bias=not use_batch_normalization,
+            name=name
+        )
+
+        if use_batch_normalization:
+            self.out = tf.layers.batch_normalization(
+                self.out,
+                training=is_training,
+                momentum=_BATCH_NORM_DECAY,
+                epsilon=_BATCH_NORM_EPSILON,
+                name=name
+            )
+
+        if activation_fn == "leaky":
+            self.out = tf.nn.leaky_relu(self.out, alpha=_LEAKY_RELU, name=name)
 
         # order variable names in sequence to match darknet's pre-trained weights
-        variable_prefix = self.out.name.rsplit("/", 1)[0]
+        variable_prefix = name
         self.variable_names = []
         if use_batch_normalization:
-            self.variable_names.append("{}/BatchNorm/beta".format(variable_prefix))
-            self.variable_names.append("{}/BatchNorm/gamma".format(variable_prefix))
-            self.variable_names.append("{}/BatchNorm/moving_mean".format(variable_prefix))
-            self.variable_names.append("{}/BatchNorm/moving_variance".format(variable_prefix))
+            self.variable_names.append("{}/{}/beta".format(scope, variable_prefix))
+            self.variable_names.append("{}/{}/gamma".format(scope, variable_prefix))
+            self.variable_names.append("{}/{}/moving_mean".format(scope, variable_prefix))
+            self.variable_names.append("{}/{}/moving_variance".format(scope, variable_prefix))
         else:
-            self.variable_names.append("{}/biases".format(variable_prefix))
-        self.variable_names.append("{}/weights".format(variable_prefix))
+            self.variable_names.append("{}/{}/bias".format(scope, variable_prefix))
+        self.variable_names.append("{}/{}/kernel".format(scope, variable_prefix))
 
 
 class max_pool2d(object):
@@ -60,7 +68,12 @@ class max_pool2d(object):
         if stride > 1:
             prev = _pad(prev, kernel_size)
         padding = "SAME" if stride == 1 else "VALID"
-        self.out = slim.max_pool2d(prev, kernel_size, stride, padding)
+        self.out = tf.layers.max_pooling2d(
+            inputs=prev,
+            pool_size=kernel_size,
+            strides=stride,
+            padding=padding
+        )
         self.variable_names = []
 
 

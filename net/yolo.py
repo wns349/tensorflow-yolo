@@ -19,10 +19,10 @@ def load_weights(layers, weights):
             tokens = var.name.split("/")
             size = np.prod(var.shape.as_list())
             shape = var.shape.as_list()
-            if "weights" in tokens[-1]:
+            if "kernel" in tokens[-1]:
                 shape = [shape[3], shape[2], shape[0], shape[1]]
             value = np.reshape(weights[read: read + size], shape)
-            if "weights" in tokens[-1]:
+            if "kernel" in tokens[-1]:
                 value = np.transpose(value, (2, 3, 1, 0))
             ops.append(tf.assign(var, value, validate_shape=True))
             read += size

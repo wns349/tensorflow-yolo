@@ -15,40 +15,42 @@ def create_full_network(num_anchors, num_classes, is_training, scope="yolo", inp
         layers.append(input_layer([None, input_shape[0], input_shape[1], input_shape[2]], "input"))
 
         for filter_size in (32, 64):
-            layers.append(conv2d_bn_act(layers[-1].out, filter_size, 3, stride=1, is_training=is_training))
+            layers.append(conv2d_bn_act(layers[-1].out, filter_size, 3, stride=1, is_training=is_training, scope=scope))
             layers.append(max_pool2d(layers[-1].out, 2, stride=2))
 
         for filter_size in (128, 256):
-            layers.append(conv2d_bn_act(layers[-1].out, filter_size, 3, stride=1, is_training=is_training))
-            layers.append(conv2d_bn_act(layers[-1].out, filter_size // 2, 1, stride=1, is_training=is_training))
-            layers.append(conv2d_bn_act(layers[-1].out, filter_size, 3, stride=1, is_training=is_training))
+            layers.append(conv2d_bn_act(layers[-1].out, filter_size, 3, stride=1, is_training=is_training, scope=scope))
+            layers.append(
+                conv2d_bn_act(layers[-1].out, filter_size // 2, 1, stride=1, is_training=is_training, scope=scope))
+            layers.append(conv2d_bn_act(layers[-1].out, filter_size, 3, stride=1, is_training=is_training, scope=scope))
             layers.append(max_pool2d(layers[-1].out, 2, stride=2))
 
-        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 256, 1, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 256, 1, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, stride=1, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 256, 1, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 256, 1, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 512, 3, stride=1, is_training=is_training, scope=scope))
         layers.append(max_pool2d(layers[-1].out, 2, stride=2))
 
-        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 512, 1, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 512, 1, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 512, 1, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 512, 1, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training, scope=scope))
 
-        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training))
-        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training, scope=scope))
+        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training, scope=scope))
         layers.append(route([layers[-9].out]))
-        layers.append(conv2d_bn_act(layers[-1].out, 64, 1, stride=1, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 64, 1, stride=1, is_training=is_training, scope=scope))
         layers.append(reorg(layers[-1].out, 2))
         layers.append(route([layers[-1].out, layers[-4].out]))
-        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training))
+        layers.append(conv2d_bn_act(layers[-1].out, 1024, 3, stride=1, is_training=is_training, scope=scope))
 
         layers.append(conv2d_bn_act(layers[-1].out, num_anchors * (5 + num_classes), 1, 1,
                                     use_batch_normalization=False,
                                     activation_fn="linear",
-                                    is_training=is_training))
+                                    is_training=is_training,
+                                    scope=scope))
 
         # rename last layer for convenience
         layers[-1].out = tf.identity(layers[-1].out, "output")
@@ -310,7 +312,9 @@ class YoloV2(yolo.Yolo):
             yield np.concatenate(net_images, axis=0), net_placeholders
 
     def _create_train_optimizer(self, loss_fn, learning_rate):
-        return tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss_fn)
+        extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(extra_update_ops):
+            return tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss_fn)
 
     def _create_loss_fn(self, batch_size):
         net_out = self.net[-1].out
