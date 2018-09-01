@@ -1,4 +1,7 @@
-tensorflow_gpu==1.9.0
-opencv_python==3.4.1.15
-numpy==1.14.5
-tensorflow==1.9.0
+tqdm
+scikit-learn
+scipy
+tensorflow_gpu
+tensorflow
+opencv_python
+numpy

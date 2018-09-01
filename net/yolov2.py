@@ -3,6 +3,7 @@ import random
 
 import numpy as np
 import tensorflow as tf
+import sklearn.cluster
 
 from . import yolo
 from .layers import conv2d_bn_act, input_layer, max_pool2d, route, reorg
@@ -104,9 +105,41 @@ def find_bounding_boxes(out, anchors, threshold):
     return bboxes
 
 
-class YoloV2(yolo.Yolo):
+def run_kmeans(data, num_anchors, tolerate, verbose=False):
+    km = sklearn.cluster.KMeans(n_clusters=num_anchors, tol=tolerate, verbose=verbose)
+    km.fit(data)
+    return km.cluster_centers_
+
+
+class YoloV2(object):
     def __init__(self):
         super().__init__()
+
+    def generate_anchors(self, params):
+        num_anchors = int(params["num_anchors"])
+        image_dir = params["image_dir"]
+        annotation_dir = params["annotation_dir"]
+        tolerate = float(params["tolerate"])
+        stride = int(params["stride"])
+        input_w = int(params["input_w"])
+        input_h = int(params["input_h"])
+
+        annotations = yolo.parse_annotations(annotation_dir, image_dir, normalize=True)
+        print("{} annotations found.".format(len(annotations)))
+        class_names = set()
+        data = []
+        for annotation in annotations:
+            obj = annotation[1]
+            for o in obj:
+                w = float(o[2] - o[0])
+                h = float(o[3] - o[1])
+                data.append([w, h])
+                class_names.add(o[-1])
+        anchors = run_kmeans(data, num_anchors, tolerate)
+        anchors = [[a[0] * input_w / stride, a[1] * input_h / stride] for a in anchors]
+        anchors = np.reshape(anchors, [-1])
+
+        return anchors, class_names
 
     def initialize(self, params, is_training):
         assert "anchors" in params and isinstance(params["anchors"], list)

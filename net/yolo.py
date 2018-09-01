@@ -5,6 +5,7 @@ import re
 import cv2
 import numpy as np
 import tensorflow as tf
+from tqdm import tqdm
 
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 255, 0), (255, 0, 255)]
 
@@ -39,14 +40,18 @@ def load_image_paths(path_to_img_dir):
             if any(f.lower().endswith(ext) for ext in ["jpg", "bmp", "png", "gif"])]
 
 
-def parse_annotations(annotation_dir, image_dir):
+def parse_annotations(annotation_dir, image_dir, normalize=False):
     annotations = [os.path.join(os.path.abspath(annotation_dir), f) for f in os.listdir(annotation_dir)
                    if f.lower().endswith(".xml")]
 
     result = []
-    for annotation in annotations:
+    for annotation in tqdm(annotations):
         root = ET.parse(annotation).getroot()
         img_path = os.path.join(image_dir, root.find("filename").text)
+
+        size = root.find("size")
+        w = int(size.find("width").text)
+        h = int(size.find("height").text)
 
         img_objects = []
         objects = root.findall("object")
@@ -57,6 +62,9 @@ def parse_annotations(annotation_dir, image_dir):
             y1 = int(bndbox.find("ymin").text)
             x2 = int(bndbox.find("xmax").text)
             y2 = int(bndbox.find("ymax").text)
+            if normalize:
+                x1, x2 = x1 / w, x2 / w
+                y1, y2 = y1 / h, y2 / h
             img_objects.append((x1, y1, x2, y2, name))
 
         result.append((img_path, img_objects))
@@ -202,3 +210,9 @@ class BoundingBox(object):
 class Yolo(object):
     def __init__(self):
         pass
+
+    def train(self, params):
+        raise NotImplementedError()
+
+    def test(self, params):
+        raise NotImplemented()
