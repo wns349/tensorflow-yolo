@@ -125,6 +125,155 @@ def _find_bounding_boxes(out, anchors, threshold):
     return bboxes
 
 
+def _create_loss_fn(batch_size, net, anchors, class_names):
+    net_out = net[-1].out
+    h, w = net_out.get_shape().as_list()[1:3]
+
+    cell_x = tf.to_float(tf.reshape(tf.tile(tf.range(h), [w]), (1, h, w, 1, 1)))
+    cell_y = tf.transpose(cell_x, (0, 2, 1, 3, 4))
+    cell_xy = tf.tile(tf.concat([cell_x, cell_y], -1), [batch_size, 1, 1, len(anchors), 1])
+    _anchors = np.reshape(anchors, [1, 1, 1, len(anchors), 2])
+
+    pred = tf.reshape(net_out, [-1, h, w, len(anchors), 5 + len(class_names)])
+    pred_xy = tf.sigmoid(pred[..., 0:2]) + cell_xy
+    pred_wh = tf.exp(pred[..., 2:4]) * _anchors
+    pred_obj = tf.expand_dims(tf.sigmoid(pred[..., 4]), axis=-1)
+    pred_class = pred[..., 5:]
+
+    # ground truth
+    gt = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors), 5 + len(class_names)])
+    gt_ij = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors)])
+    gt_i = tf.placeholder(dtype=np.float32, shape=[None, h, w])
+    placeholders = {
+        "gt": gt, "gt_ij": gt_ij, "gt_i": gt_i
+    }
+
+    gt_xy = gt[..., 0:2]
+    gt_wh = gt[..., 2:4]
+    gt_obj = tf.expand_dims(gt[..., 4], axis=-1)
+    gt_class = tf.argmax(gt[..., 5:], axis=-1)
+
+    mask_ij = tf.expand_dims(gt_ij, axis=-1)
+    mask_i = tf.expand_dims(gt_i, axis=-1)
+
+    loss_xy = 1. * tf.reduce_sum(mask_ij * tf.square(gt_xy - pred_xy)) / batch_size
+    loss_wh = 1. * tf.reduce_sum(mask_ij * tf.square(tf.sqrt(gt_wh) - tf.sqrt(pred_wh))) / batch_size
+    loss_obj = 5. * tf.reduce_sum(mask_ij * tf.square(gt_obj - pred_obj)) / batch_size
+    loss_noobj = 1. * tf.reduce_sum((1 - mask_ij) * tf.square(gt_obj - pred_obj)) / batch_size
+    loss_class = 1. * tf.reduce_sum(
+        mask_i * tf.nn.sparse_softmax_cross_entropy_with_logits(labels=gt_class, logits=pred_class))
+
+    loss = loss_xy + loss_wh + loss_obj + loss_noobj + loss_class
+
+    with tf.name_scope("losses"):
+        tf.summary.scalar("loss", loss)
+        tf.summary.scalar("loss_xy", loss_xy)
+        tf.summary.scalar("loss_wh", loss_wh)
+        tf.summary.scalar("loss_obj", loss_obj)
+        tf.summary.scalar("loss_noobj", loss_noobj)
+        tf.summary.scalar("loss_class", loss_class)
+
+    return loss, placeholders
+
+
+def _create_train_optimizer(loss_fn, learning_rate):
+    extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(extra_update_ops):
+        return tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss_fn)
+
+
+def _make_batch(net, annotations, batch_size, anchors, class_names, augment_prob):
+    if len(annotations) == 0:
+        yield [], {}
+    elif len(annotations) < batch_size:
+        batch_size = len(annotations)  # change batch_size
+
+    total_batches = int(np.ceil(len(annotations) / batch_size))
+    if len(annotations) % batch_size > 0:
+        annotations.extend(annotations[0:batch_size - len(annotations) % batch_size])
+
+    random.shuffle(annotations)
+
+    input_h, input_w, input_c = net[0].out.get_shape().as_list()[1:4]
+    for batch in range(total_batches):
+        net_images = []
+        net_placeholders = {}
+        for i in range(batch_size):
+            img_path, img_objects = annotations[batch * batch_size + i]
+            net_image, objects = yolo.preprocess_image(img_path, (input_h, input_w, input_c), img_objects, augment_prob)
+            net_placeholder = _make_ground_truths(net, objects, anchors, class_names)
+
+            net_images.append(np.expand_dims(net_image, axis=0))
+            for k in net_placeholder:
+                new_value = net_placeholder[k]
+                if k in net_placeholders:
+                    old_value = net_placeholders.get(k)
+                else:
+                    old_value = np.zeros((0,) + new_value.shape)
+                net_placeholders[k] = np.concatenate([old_value, [new_value]])
+
+        yield np.concatenate(net_images, axis=0), net_placeholders
+
+
+def _make_ground_truths(net, objects, anchors, class_names):
+    input_h, input_w = net[0].out.get_shape().as_list()[1:3]
+    output_h, output_w = net[-1].out.get_shape().as_list()[1:3]
+    gts = np.zeros(shape=[output_h, output_w, len(anchors), 5 + len(class_names)])
+    gt_ij = np.zeros(shape=[output_h, output_w, len(anchors)])
+    gt_i = np.zeros(shape=[output_h, output_w])
+
+    stride_h = input_h / output_h
+    stride_w = input_w / output_w
+
+    boxes = []
+    for obj in objects:
+        # xmin, ymin, xmax, ymax, name
+        bx = (obj[0] + obj[2]) * .5 / input_w * output_w
+        by = (obj[1] + obj[3]) * .5 / input_h * output_h
+        bw = (obj[2] - obj[0]) / input_w * output_w
+        bh = (obj[3] - obj[1]) / input_h * output_h
+        cx = int(bx // stride_w)
+        cy = int(by // stride_h)
+
+        boxes.append(yolo.BoundingBox(bx, by, bw, bh, cx, cy, class_names.index(obj[4])))
+
+    best_boxes = {}
+    for box in boxes:
+        key = "{}_{}".format(box.cx, box.cy)
+        if key in best_boxes:
+            best_box, best_iou, best_anchor_idx = best_boxes[key]
+        else:
+            best_box, best_iou, best_anchor_idx = None, -1, -1
+
+        _box = yolo.BoundingBox(0, 0, box.w, box.h)
+        for idx, anchor in enumerate(anchors):
+            _anchor_box = yolo.BoundingBox(0, 0, anchor[0], anchor[1])
+            iou = yolo.iou_score(_box, _anchor_box)
+            if best_iou < iou:
+                best_iou = iou
+                best_box = box
+                best_anchor_idx = idx
+        best_boxes[key] = (best_box, best_iou, best_anchor_idx)
+
+    for b in best_boxes:
+        best_box, best_iou, best_anchor_idx = best_boxes[b]
+        gts[best_box.cy, best_box.cx, best_anchor_idx, 0] = best_box.x
+        gts[best_box.cy, best_box.cx, best_anchor_idx, 1] = best_box.y
+        gts[best_box.cy, best_box.cx, best_anchor_idx, 2] = best_box.w
+        gts[best_box.cy, best_box.cx, best_anchor_idx, 3] = best_box.h
+        gts[best_box.cy, best_box.cx, best_anchor_idx, 4] = best_iou
+        gts[best_box.cy, best_box.cx, best_anchor_idx, 5 + best_box.class_idx] = 1
+
+        gt_ij[best_box.cy, best_box.cx, best_anchor_idx] = 1
+        gt_i[best_box.cy, best_box.cx] = 1
+
+    return {
+        "gt": gts,
+        "gt_ij": gt_ij,
+        "gt_i": gt_i
+    }
+
+
 def generate_anchors(params):
     num_anchors = int(params["num_anchors"])
     image_dir = params["image_dir"]
@@ -188,7 +337,7 @@ def test(params):
         else:
             print("Checkpoint {} restored.".format(checkpoint_path))
 
-        input_shape = tuple(net[0].out.get_shape().as_list()[1:3])
+        input_shape = tuple(net[0].out.get_shape().as_list()[1:4])
         test_batches = yolo.generate_test_batch(image_paths, batch_size, input_shape)
         for x_batch, paths in test_batches:  # run batch
             net_out = sess.run(net[-1].out, feed_dict={net[0].out: x_batch})
@@ -209,32 +358,44 @@ def test(params):
                 out_path = os.path.join(out_dir, "{}_out{}".format(file_name, file_ext))
                 yolo.save_image(new_img, out_path)
                 print("{}: Found {} objects. Saved to {}".format(file_name, len(boxes), out_path))
+        print("Done")
 
 
+def train(params):
+    train_image_dir = params["image_dir"]
+    train_annotation_dir = params["annotation_dir"]
+    val_image_dir = params["val_image_dir"]
+    val_annotation_dir = params["val_annotation_dir"]
+    batch_size = int(params["batch_size"])
+    learning_rate = float(params["learning_rate"])
+    augment_prob = float(params["augment_probability"])
+    checkpoint_prefix = params["checkpoint_prefix"]
+    checkpoint_dir = params["checkpoint_dir"]
+    checkpoint_step = int(params["checkpoint_step"])
+    pretrained_weights_path = params["pretrained_weights_path"]
+    tensorboard_log_dir = params["tensorboard_log_dir"]
+    anchors = np.reshape(params["anchors"], [-1, 2])
+    class_names = params["class_names"]
+    input_h = int(params["input_h"])
+    input_w = int(params["input_w"])
+    input_c = int(params["input_c"])
+    epochs = int(params["epochs"])
+    max_step = int(params["max_step"])
 
-class YoloV2(object):
-    def __init__(self):
-        super().__init__()
+    # prepare data
+    train_annotations = yolo.parse_annotations(train_annotation_dir, train_image_dir)
+    assert len(train_annotations) > 0
+    val_annotations = yolo.parse_annotations(val_annotation_dir, val_image_dir)
 
-    def train(self,
-              train_image_dir,
-              train_annotation_dir,
-              val_image_dir,
-              val_annotation_dir,
-              batch_size,
-              epochs,
-              learning_rate,
-              augment_probability,
-              pretrained_weights_path,
-              checkpoint_step,
-              checkpoint_dir,
-              tensorboard_log_dir):
-        train_annotations = yolo.parse_annotations(train_annotation_dir, train_image_dir)
-        assert len(train_annotations) > 0
-        val_annotations = yolo.parse_annotations(val_annotation_dir, val_image_dir)
+    # build network
+    net = _create_full_network(len(anchors), len(class_names), True, input_shape=(input_h, input_w, input_c))
 
-        loss, placeholders = self._create_loss_fn(batch_size)
-        train_op = self._create_train_optimizer(loss, learning_rate)
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+
+        # create loss function
+        loss, placeholders = _create_loss_fn(batch_size, net, anchors, class_names)
+        train_op = _create_train_optimizer(loss, learning_rate)
         saver = tf.train.Saver()
         with tf.Session() as sess:
             tf_summary = tf.summary.merge_all()
@@ -242,186 +403,55 @@ class YoloV2(object):
             val_writer = tf.summary.FileWriter(os.path.join(tensorboard_log_dir, "validation"), sess.graph)
             sess.run(tf.global_variables_initializer())
 
-            # load pretrained weights/checkpoint
-            step = yolo.load_checkpoint(saver, sess, checkpoint_dir)
-            if step == 0 and pretrained_weights_path is not None:
-                print("Running pretrained weights")
-                weight_ops = load_weights(self.net, pretrained_weights_path)
-                sess.run(weight_ops)
+            # load pre-trained weights/checkpoint
+            step = yolo.load_checkpoint(saver, sess, checkpoint_dir, checkpoint_prefix)
+            if step < 0:
+                # load pre-trained weights
+                ops = _load_weights(net, pretrained_weights_path)
+                sess.run(ops)
+                print("Pre-trained weights loaded.")
+                step = 0
+                yolo.save_checkpoint(saver, sess, checkpoint_dir, checkpoint_prefix, step)
+            else:
+                print("Checkpoint restored. step:{}".format(step))
 
             # make train batch
             train_loss_mva = None
             for epoch in range(1, epochs + 1):
-                batches = self._make_batch(train_annotations, batch_size)
+                if 0 <= max_step < step:
+                    break
+                batches = _make_batch(net, train_annotations, batch_size, anchors, class_names, augment_prob)
                 for feed_images, feed_gts in batches:
                     step += 1
+                    if 0 <= max_step < step:
+                        break
                     feed_dict = {placeholders[key]: feed_gts[key] for key in placeholders}
-                    feed_dict[self.net[0].out] = feed_images
+                    feed_dict[net[0].out] = feed_images
                     _, summary, train_loss = sess.run([train_op, tf_summary, loss], feed_dict=feed_dict)
 
                     train_writer.add_summary(summary, step)
+                    train_writer.flush()
                     train_loss_mva = train_loss_mva * 0.9 + train_loss * 0.1 if train_loss_mva is not None else train_loss
                     print("step {} ({}/{}): {} (moving average: {})".format(step, epoch, epochs, train_loss,
                                                                             train_loss_mva))
                     if step > 0 and step % checkpoint_step == 0:
-                        yolo.save_checkpoint(saver, sess, checkpoint_dir, step)
+                        yolo.save_checkpoint(saver, sess, checkpoint_dir, checkpoint_prefix, step)
 
-    def _make_ground_truths(self, objects):
-        input_h, input_w = self.net[0].out.get_shape().as_list()[1:3]
-        output_h, output_w = self.net[-1].out.get_shape().as_list()[1:3]
-        gts = np.zeros(shape=[output_h, output_w, len(self.anchors), 5 + len(self.names)])
-        gt_ij = np.zeros(shape=[output_h, output_w, len(self.anchors)])
-        gt_i = np.zeros(shape=[output_h, output_w])
-
-        stride_h = input_h / output_h
-        stride_w = input_w / output_w
-
-        boxes = []
-        for obj in objects:
-            # xmin, ymin, xmax, ymax, name
-            bx = (obj[0] + obj[2]) * .5 / input_w * output_w
-            by = (obj[1] + obj[3]) * .5 / input_h * output_h
-            bw = (obj[2] - obj[0]) / input_w * output_w
-            bh = (obj[3] - obj[1]) / input_h * output_h
-            cx = int(bx // stride_w)
-            cy = int(by // stride_h)
-
-            boxes.append(yolo.BoundingBox(bx, by, bw, bh, cx, cy, self.names.index(obj[4])))
-
-        best_boxes = {}
-        for box in boxes:
-            key = "{}_{}".format(box.cx, box.cy)
-            if key in best_boxes:
-                best_box, best_iou, best_anchor_idx = best_boxes[key]
-            else:
-                best_box, best_iou, best_anchor_idx = None, -1, -1
-
-            _box = yolo.BoundingBox(0, 0, box.w, box.h)
-            for idx, anchor in enumerate(self.anchors):
-                _anchor_box = yolo.BoundingBox(0, 0, anchor[0], anchor[1])
-                iou = yolo.iou_score(_box, _anchor_box)
-                if best_iou < iou:
-                    best_iou = iou
-                    best_box = box
-                    best_anchor_idx = idx
-            best_boxes[key] = (best_box, best_iou, best_anchor_idx)
-
-        for b in best_boxes:
-            best_box, best_iou, best_anchor_idx = best_boxes[b]
-            gts[best_box.cy, best_box.cx, best_anchor_idx, 0] = best_box.x
-            gts[best_box.cy, best_box.cx, best_anchor_idx, 1] = best_box.y
-            gts[best_box.cy, best_box.cx, best_anchor_idx, 2] = best_box.w
-            gts[best_box.cy, best_box.cx, best_anchor_idx, 3] = best_box.h
-            gts[best_box.cy, best_box.cx, best_anchor_idx, 4] = best_iou
-            gts[best_box.cy, best_box.cx, best_anchor_idx, 5 + best_box.class_idx] = 1
-
-            gt_ij[best_box.cy, best_box.cx, best_anchor_idx] = 1
-            gt_i[best_box.cy, best_box.cx] = 1
-
-        return {
-            "gt": gts,
-            "gt_ij": gt_ij,
-            "gt_i": gt_i
-        }
-
-    def _make_batch(self, annotations, batch_size):
-        if len(annotations) == 0:
-            yield [], {}
-        elif len(annotations) < batch_size:
-            batch_size = len(annotations)  # change batch_size
-            # annotations = annotations * int(batch_size / len(annotations))  # repeat
-
-        total_batches = int(np.ceil(len(annotations) / batch_size))
-        if len(annotations) % batch_size > 0:
-            annotations.extend(annotations[0:batch_size - len(annotations) % batch_size])
-
-        random.shuffle(annotations)
-
-        input_h, input_w = self.net[0].out.get_shape().as_list()[1:3]
-        for batch in range(total_batches):
-            net_images = []
-            net_placeholders = {}
-            for i in range(batch_size):
-                img_path, img_objects = annotations[batch * batch_size + i]
-                # TODO: augmentation?
-                net_image, objects = yolo.preprocess_image(img_path, (input_h, input_w), img_objects)
-                net_placeholder = self._make_ground_truths(objects)
-
-                net_images.append(np.expand_dims(net_image, axis=0))
-                for k in net_placeholder:
-                    new_value = net_placeholder[k]
-                    if k in net_placeholders:
-                        old_value = net_placeholders.get(k)
-                    else:
-                        old_value = np.zeros((0,) + new_value.shape)
-                    net_placeholders[k] = np.concatenate([old_value, [new_value]])
-
-            yield np.concatenate(net_images, axis=0), net_placeholders
-
-    def _create_train_optimizer(self, loss_fn, learning_rate):
-        extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(extra_update_ops):
-            return tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss_fn)
-
-    def _create_loss_fn(self, batch_size):
-        net_out = self.net[-1].out
-        h, w = net_out.get_shape().as_list()[1:3]
-
-        cell_x = tf.to_float(tf.reshape(tf.tile(tf.range(h), [w]), (1, h, w, 1, 1)))
-        cell_y = tf.transpose(cell_x, (0, 2, 1, 3, 4))
-        cell_xy = tf.tile(tf.concat([cell_x, cell_y], -1), [batch_size, 1, 1, len(self.anchors), 1])
-        _anchors = np.reshape(self.anchors, [1, 1, 1, len(self.anchors), 2])
-
-        pred = tf.reshape(net_out, [-1, h, w, len(self.anchors), 5 + len(self.names)])
-        pred_xy = tf.sigmoid(pred[..., 0:2]) + cell_xy
-        pred_wh = tf.exp(pred[..., 2:4]) * _anchors
-        pred_obj = tf.expand_dims(tf.sigmoid(pred[..., 4]), axis=-1)
-        pred_class = pred[..., 5:]
-
-        # ground truth
-        gt = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(self.anchors), 5 + len(self.names)])
-        gt_ij = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(self.anchors)])
-        gt_i = tf.placeholder(dtype=np.float32, shape=[None, h, w])
-        placeholders = {
-            "gt": gt, "gt_ij": gt_ij, "gt_i": gt_i
-        }
-
-        gt_xy = gt[..., 0:2]
-        gt_wh = gt[..., 2:4]
-        gt_obj = tf.expand_dims(gt[..., 4], axis=-1)
-        gt_class = tf.argmax(gt[..., 5:], axis=-1)
-
-        mask_ij = tf.expand_dims(gt_ij, axis=-1)
-        mask_i = tf.expand_dims(gt_i, axis=-1)
-
-        loss_xy = 1. * tf.reduce_sum(mask_ij * tf.square(gt_xy - pred_xy)) / batch_size
-        loss_wh = 1. * tf.reduce_sum(mask_ij * tf.square(tf.sqrt(gt_wh) - tf.sqrt(pred_wh))) / batch_size
-        loss_obj = 5. * tf.reduce_sum(mask_ij * tf.square(gt_obj - pred_obj)) / batch_size
-        loss_noobj = 1. * tf.reduce_sum((1 - mask_ij) * tf.square(gt_obj - pred_obj)) / batch_size
-        loss_class = 1. * tf.reduce_sum(
-            mask_i * tf.nn.sparse_softmax_cross_entropy_with_logits(labels=gt_class, logits=pred_class))
-
-        loss = loss_xy + loss_wh + loss_obj + loss_noobj + loss_class
-
-        with tf.name_scope("losses"):
-            tf.summary.scalar("loss", loss)
-            tf.summary.scalar("loss_xy", loss_xy)
-            tf.summary.scalar("loss_wh", loss_wh)
-            tf.summary.scalar("loss_obj", loss_obj)
-            tf.summary.scalar("loss_noobj", loss_noobj)
-            tf.summary.scalar("loss_class", loss_class)
-
-        return loss, placeholders
-
-
-if __name__ == "__main__":
-    o = YoloV2()
-    o.initialize({
-        "anchors": [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828],
-        "names": ["tower"]
-    }, True)
-    o.train("./resource/eiffel/train/", "./resource/eiffel/train/",
-            "./resource/eiffel/val/", "./resource/eiffel/val/",
-            2, 1000, 1e-5, 0.3, "./bin/yolov2.weights", 5, "./out/", "./log/")
-
+                        # validation
+                        val_batches = _make_batch(net, val_annotations, batch_size, anchors, class_names, 0)
+                        val_total = 0
+                        val_count = 0
+                        for val_feed_images, val_feed_gts in val_batches:
+                            val_feed_dict = {placeholders[key]: val_feed_gts[key] for key in placeholders}
+                            val_feed_dict[net[0].out] = val_feed_images
+                            val_loss = sess.run([loss], feed_dict=val_feed_dict)
+                            val_total += float(val_loss)
+                            val_count += 1
+                        val_loss = val_total / val_count
+                        val_summary = tf.Summary(value=[
+                            tf.Summary.Value(tag="loss", simple_value=val_loss),
+                        ])
+                        val_writer.add_summary(val_summary)
+                        val_writer.flush()
+                        print("validation loss: {}".format(val_loss))
     print("Done")

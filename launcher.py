@@ -20,7 +20,8 @@ def _main(cfg, mode):
         raise ValueError("Unsupported version: {}".format(version))
 
     if mode == "train":
-        pass
+        params = {**cfg["TRAIN"], **cfg["COMMON"]}
+        yolo.train(params)
     elif mode == "test":
         params = {**cfg["TEST"], **cfg["COMMON"]}
         yolo.test(params)
@@ -44,7 +45,7 @@ if __name__ == "__main__":
     args.add_argument("--config", dest="config", help="Path to configuration file",
                       default=os.path.join(os.path.dirname(__file__), "config", "yolo_2.ini"))
     args.add_argument("--mode", dest="mode", help="Mode: (train|test|anchor)",
-                      default="test")
+                      default="train")
     c = args.parse_args()
 
     cfg = configparser.ConfigParser()
