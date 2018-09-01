@@ -3,13 +3,12 @@ import random
 
 import numpy as np
 import tensorflow as tf
-import sklearn.cluster
 
 from . import yolo
 from .layers import conv2d_bn_act, input_layer, max_pool2d, route, reorg
 
 
-def create_full_network(num_anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
+def _create_full_network(num_anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
     tf.reset_default_graph()
     layers = []
     with tf.variable_scope(scope):
@@ -58,7 +57,7 @@ def create_full_network(num_anchors, num_classes, is_training, scope="yolo", inp
     return layers
 
 
-def load_weights(layers, weights_path):
+def _load_weights(layers, weights_path):
     print("Reading pre-trained weights from {}".format(weights_path))
 
     # header
@@ -73,10 +72,31 @@ def load_weights(layers, weights_path):
         print("SEEN: ", seen)
         weights = np.fromfile(f, dtype=np.float32)
 
-    return yolo.load_weights(layers, weights)
+    variables = {v.op.name: v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="yolo")}
+    ops = []
+    read = 0
+    for layer in layers:
+        for variable_name in layer.variable_names:
+            var = variables[variable_name]
+            tokens = var.name.split("/")
+            size = np.prod(var.shape.as_list())
+            shape = var.shape.as_list()
+            if "kernel" in tokens[-1]:
+                shape = [shape[3], shape[2], shape[0], shape[1]]
+            value = np.reshape(weights[read: read + size], shape)
+            if "kernel" in tokens[-1]:
+                value = np.transpose(value, (2, 3, 1, 0))
+            ops.append(tf.assign(var, value, validate_shape=True))
+            read += size
+
+    print("Weights ready ({}/{} read)".format(read, len(weights)))
+    if read != len(weights):
+        print("(warning) read count and total count do not match. Possibly an incorrect weights file.")
+
+    return ops
 
 
-def find_bounding_boxes(out, anchors, threshold):
+def _find_bounding_boxes(out, anchors, threshold):
     h, w = out.shape[0:2]
     no_b = len(anchors)
     bboxes = []
@@ -105,102 +125,96 @@ def find_bounding_boxes(out, anchors, threshold):
     return bboxes
 
 
-def run_kmeans(data, num_anchors, tolerate, verbose=False):
-    km = sklearn.cluster.KMeans(n_clusters=num_anchors, tol=tolerate, verbose=verbose)
-    km.fit(data)
-    return km.cluster_centers_
+def generate_anchors(params):
+    num_anchors = int(params["num_anchors"])
+    image_dir = params["image_dir"]
+    annotation_dir = params["annotation_dir"]
+    tolerate = float(params["tolerate"])
+    stride = int(params["stride"])
+    input_w = int(params["input_w"])
+    input_h = int(params["input_h"])
+
+    annotations = yolo.parse_annotations(annotation_dir, image_dir, normalize=True)
+    print("{} annotations found.".format(len(annotations)))
+    class_names = set()
+    data = []
+    for annotation in annotations:
+        obj = annotation[1]
+        for o in obj:
+            w = float(o[2] - o[0])
+            h = float(o[3] - o[1])
+            data.append([w, h])
+            class_names.add(o[-1])
+    anchors = yolo.run_kmeans(data, num_anchors, tolerate)
+    anchors = [[a[0] * input_w / stride, a[1] * input_h / stride] for a in anchors]
+    anchors = np.reshape(anchors, [-1])
+
+    return anchors, class_names
+
+
+def test(params):
+    image_dir = params["image_dir"]
+    out_dir = params["out_dir"]
+    batch_size = int(params["batch_size"])
+    threshold = float(params["threshold"])
+    iou_threshold = float(params["iou_threshold"])
+    anchors = np.reshape(params["anchors"], [-1, 2])
+    class_names = params["class_names"]
+    input_h = int(params["input_h"])
+    input_w = int(params["input_w"])
+    input_c = int(params["input_c"])
+    checkpoint_path = params["checkpoint_path"]
+    pretrained_weights_path = params["pretrained_weights_path"]
+
+    # load images
+    image_paths = yolo.load_image_paths(image_dir)
+    if len(image_paths) == 0:
+        print("No test images found in {}".format(image_dir))
+        return
+
+    # build network
+    net = _create_full_network(len(anchors), len(class_names), False, input_shape=(input_h, input_w, input_c))
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+
+        # load checkpoint
+        saver = tf.train.Saver()
+        if not yolo.load_checkpoint_by_path(saver, sess, checkpoint_path):
+            # load pre-trained weights
+            ops = _load_weights(net, pretrained_weights_path)
+            sess.run(ops)
+            print("Pre-trained weights loaded.")
+        else:
+            print("Checkpoint {} restored.".format(checkpoint_path))
+
+        input_shape = tuple(net[0].out.get_shape().as_list()[1:3])
+        test_batches = yolo.generate_test_batch(image_paths, batch_size, input_shape)
+        for x_batch, paths in test_batches:  # run batch
+            net_out = sess.run(net[-1].out, feed_dict={net[0].out: x_batch})
+
+            # post-process
+            net_boxes = []
+            net_out = np.reshape(net_out,
+                                 [-1, net_out.shape[1], net_out.shape[2], len(anchors), (5 + len(class_names))])
+            for out in net_out:
+                bounding_boxes = _find_bounding_boxes(out, anchors, threshold)
+                net_boxes.append(yolo.non_maximum_suppression(bounding_boxes, iou_threshold))
+
+            for boxes, path in zip(net_boxes, paths):
+                # draw box on image
+                new_img = yolo.draw_boxes(path, boxes, class_names)
+                # write to file
+                file_name, file_ext = os.path.splitext(os.path.basename(path))
+                out_path = os.path.join(out_dir, "{}_out{}".format(file_name, file_ext))
+                yolo.save_image(new_img, out_path)
+                print("{}: Found {} objects. Saved to {}".format(file_name, len(boxes), out_path))
+
 
 
 class YoloV2(object):
     def __init__(self):
         super().__init__()
-
-    def generate_anchors(self, params):
-        num_anchors = int(params["num_anchors"])
-        image_dir = params["image_dir"]
-        annotation_dir = params["annotation_dir"]
-        tolerate = float(params["tolerate"])
-        stride = int(params["stride"])
-        input_w = int(params["input_w"])
-        input_h = int(params["input_h"])
-
-        annotations = yolo.parse_annotations(annotation_dir, image_dir, normalize=True)
-        print("{} annotations found.".format(len(annotations)))
-        class_names = set()
-        data = []
-        for annotation in annotations:
-            obj = annotation[1]
-            for o in obj:
-                w = float(o[2] - o[0])
-                h = float(o[3] - o[1])
-                data.append([w, h])
-                class_names.add(o[-1])
-        anchors = run_kmeans(data, num_anchors, tolerate)
-        anchors = [[a[0] * input_w / stride, a[1] * input_h / stride] for a in anchors]
-        anchors = np.reshape(anchors, [-1])
-
-        return anchors, class_names
-
-    def initialize(self, params, is_training):
-        assert "anchors" in params and isinstance(params["anchors"], list)
-        self.anchors = np.reshape(params["anchors"], [-1, 2])
-        assert "names" in params
-        self.names = params["names"]
-
-        # build network
-        self.net = create_full_network(len(self.anchors), len(self.names), is_training)
-
-    def predict(self, test_img_dir, out_dir, threshold, iou_threshold,
-                batch_size=1,
-                pretrained_weights_path=None,
-                checkpoint_path=None):
-        if pretrained_weights_path is None and checkpoint_path is None:
-            raise ValueError("Path to either pretrained weights or checkpoint file is required.")
-
-        # load images
-        test_img_paths = yolo.load_image_paths(test_img_dir)
-        if len(test_img_paths) == 0:
-            print("No test images found in {}".format(test_img_dir))
-            return
-        os.makedirs(out_dir, exist_ok=True)  # create out directory, if not exists
-
-        with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
-
-            # load pretrained weights/checkpoint
-            if pretrained_weights_path is not None:
-                print("Running pretrained weights")
-                ops = load_weights(self.net, pretrained_weights_path)
-                sess.run(ops)
-            if checkpoint_path is not None:
-                # load_checkpoint(checkpoint_path)
-                # TODO: pass
-                pass
-
-            # run prediction
-            input_shape = tuple(self.net[0].out.get_shape().as_list()[1:3])
-
-            test_batches = yolo.generate_test_batch(test_img_paths, batch_size, input_shape)
-            for x_batch, paths in test_batches:
-                net_out = sess.run(self.net[-1].out, feed_dict={self.net[0].out: x_batch})
-                net_boxes = self.postprocess(net_out, threshold, iou_threshold)
-                for boxes, path in zip(net_boxes, paths):
-                    # draw box on image
-                    new_img = yolo.draw_boxes(path, boxes, self.names)
-                    # write to file
-                    file_name, file_ext = os.path.splitext(os.path.basename(path))
-                    out_path = os.path.join(out_dir, "{}_out{}".format(file_name, file_ext))
-                    yolo.save_image(new_img, out_path)
-                    print("{}: Found {} objects. Saved to {}".format(file_name, len(boxes), out_path))
-
-    def postprocess(self, net_out, threshold, iou_threshold):
-        results = []
-        out_shape = net_out.shape
-        net_out = np.reshape(net_out, [-1, out_shape[1], out_shape[2], len(self.anchors), (5 + len(self.names))])
-        for out in net_out:
-            bounding_boxes = find_bounding_boxes(out, self.anchors, threshold)
-            results.append(yolo.non_maximum_suppression(bounding_boxes, iou_threshold))
-        return results
 
     def train(self,
               train_image_dir,

@@ -1,25 +1,29 @@
-from net.yolov2 import YoloV2
+from net import yolov2 as v2
+import ast
 
 
 def _update_configs(configs, configs_path):
     for k, v in configs.items():
-        if k.endswith("_dir"):
+        if k.endswith("_dir") or k.endswith("_path"):
             if not os.path.isabs(v):
-                configs[k] = os.path.join(os.path.dirname(os.path.abspath(configs_path)), v);
+                configs[k] = os.path.join(os.path.dirname(os.path.abspath(configs_path)), v)
+        if k == "anchors" or k == "class_names":
+            configs[k] = ast.literal_eval(v)
     return configs
 
 
 def _main(cfg, mode):
     version = cfg["COMMON"]["version"]
     if version == "v2":
-        yolo = YoloV2()
+        yolo = v2
     else:
         raise ValueError("Unsupported version: {}".format(version))
 
     if mode == "train":
         pass
     elif mode == "test":
-        pass
+        params = {**cfg["TEST"], **cfg["COMMON"]}
+        yolo.test(params)
     elif mode == "anchor":
         params = {**cfg["ANCHOR"], **cfg["COMMON"]}
         anchors, class_names = yolo.generate_anchors(params)
@@ -40,7 +44,7 @@ if __name__ == "__main__":
     args.add_argument("--config", dest="config", help="Path to configuration file",
                       default=os.path.join(os.path.dirname(__file__), "config", "yolo_2.ini"))
     args.add_argument("--mode", dest="mode", help="Mode: (train|test|anchor)",
-                      default="anchor")
+                      default="test")
     c = args.parse_args()
 
     cfg = configparser.ConfigParser()
