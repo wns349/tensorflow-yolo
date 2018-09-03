@@ -45,7 +45,7 @@ if __name__ == "__main__":
     args.add_argument("--config", dest="config", help="Path to configuration file",
                       default=os.path.join(os.path.dirname(__file__), "config", "yolo_2.ini"))
     args.add_argument("--mode", dest="mode", help="Mode: (train|test|anchor)",
-                      default="train")
+                      default="test")
     c = args.parse_args()
 
     cfg = configparser.ConfigParser()

@@ -128,21 +128,27 @@ def _find_bounding_boxes(out, anchors, threshold):
 def _create_loss_fn(batch_size, net, anchors, class_names):
     net_out = net[-1].out
     h, w = net_out.get_shape().as_list()[1:3]
+    b, c = len(anchors), len(class_names)
 
-    cell_x = tf.to_float(tf.reshape(tf.tile(tf.range(h), [w]), (1, h, w, 1, 1)))
-    cell_y = tf.transpose(cell_x, (0, 2, 1, 3, 4))
-    cell_xy = tf.tile(tf.concat([cell_x, cell_y], -1), [batch_size, 1, 1, len(anchors), 1])
-    _anchors = np.reshape(anchors, [1, 1, 1, len(anchors), 2])
+    cell_h = tf.tile(tf.range(h), [w])
+    cell_w = tf.tile(tf.expand_dims(tf.range(w), 0), [h, 1])
+    cell_w = tf.reshape(tf.transpose(cell_w), [-1])
+    cell_hw = tf.stack([cell_h, cell_w], 1)
+    cell_hw = tf.reshape(cell_hw, [-1, h, w, 1, 2])
+    cell_hw = tf.tile(cell_hw, [1, 1, 1, b, 1])
+    cell_hw = tf.to_float(cell_hw)
 
-    pred = tf.reshape(net_out, [-1, h, w, len(anchors), 5 + len(class_names)])
-    pred_xy = tf.sigmoid(pred[..., 0:2]) + cell_xy
-    pred_wh = tf.exp(pred[..., 2:4]) * _anchors
-    pred_obj = tf.expand_dims(tf.sigmoid(pred[..., 4]), axis=-1)
+    anchor_tensor = np.reshape(anchors, [1, 1, 1, b, 2])
+
+    pred = tf.reshape(net_out, [-1, h, w, b, 5 + c])
+    pred_xy = tf.sigmoid(pred[..., 0:2]) + cell_hw
+    pred_wh = tf.exp(pred[..., 2:4]) * anchor_tensor
+    pred_obj = tf.sigmoid(pred[..., 4:5])
     pred_class = pred[..., 5:]
 
     # ground truth
-    gt = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors), 5 + len(class_names)])
-    gt_ij = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors)])
+    gt = tf.placeholder(dtype=np.float32, shape=[None, h, w, b, 5 + c])
+    gt_ij = tf.placeholder(dtype=np.float32, shape=[None, h, w, b])
     gt_i = tf.placeholder(dtype=np.float32, shape=[None, h, w])
     placeholders = {
         "gt": gt, "gt_ij": gt_ij, "gt_i": gt_i
@@ -150,7 +156,7 @@ def _create_loss_fn(batch_size, net, anchors, class_names):
 
     gt_xy = gt[..., 0:2]
     gt_wh = gt[..., 2:4]
-    gt_obj = tf.expand_dims(gt[..., 4], axis=-1)
+    gt_obj = gt[..., 4:5]
     gt_class = tf.argmax(gt[..., 5:], axis=-1)
 
     mask_ij = tf.expand_dims(gt_ij, axis=-1)
@@ -444,7 +450,7 @@ def train(params):
                         for val_feed_images, val_feed_gts in val_batches:
                             val_feed_dict = {placeholders[key]: val_feed_gts[key] for key in placeholders}
                             val_feed_dict[net[0].out] = val_feed_images
-                            val_loss = sess.run([loss], feed_dict=val_feed_dict)
+                            val_loss = sess.run(loss, feed_dict=val_feed_dict)
                             val_total += float(val_loss)
                             val_count += 1
                         val_loss = val_total / val_count
@@ -454,4 +460,5 @@ def train(params):
                         val_writer.add_summary(val_summary)
                         val_writer.flush()
                         print("validation loss: {}".format(val_loss))
+                print("Epoch ({}/{}) completed.".format(epoch, epochs + 1))
     print("Done")
