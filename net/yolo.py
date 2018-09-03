@@ -165,14 +165,32 @@ def preprocess_image(image_path, new_shape, objects=None, augment_prob=0.):
     if objects is not None:
         new_objects = []
         for obj in objects:
-            xmin = obj[0] / image.shape[1] * new_shape[1]  # xmin
-            ymin = obj[1] / image.shape[0] * new_shape[0]  # ymin
-            xmax = obj[2] / image.shape[1] * new_shape[1]  # xmin
-            ymax = obj[3] / image.shape[0] * new_shape[0]  # ymin
+            xmin = obj[0] / image.shape[1] * new_shape[1]
+            ymin = obj[1] / image.shape[0] * new_shape[0]
+            xmax = obj[2] / image.shape[1] * new_shape[1]
+            ymax = obj[3] / image.shape[0] * new_shape[0]
             new_objects.append((xmin, ymin, xmax, ymax, obj[4]))
 
         if np.random.uniform() <= augment_prob:
             net_image, new_objects = augment_image(net_image, new_objects, new_shape)
+
+    # For debug only
+    """
+    from copy import deepcopy
+    tmp = deepcopy(net_image)
+    for obj in new_objects:
+        tl = int(obj[0]), int(obj[1])
+        br = int(obj[2]), int(obj[3])
+        tmp = np.ascontiguousarray(tmp[:, :, ::-1], dtype=np.uint8)
+        print(tl, br, tmp.shape)
+        print(tmp)
+        cv2.rectangle(tmp, tl, br, (0, 255, 0), thickness=3)
+        print(tl, br, tmp.shape)
+    cv2.imshow("image", tmp)
+    cv2.waitKey(0)
+    """
+
+    net_image = net_image / 255.
 
     return net_image, new_objects
 
@@ -184,7 +202,7 @@ def generate_test_batch(img_paths, batch_size, input_shape):
         images = []
         paths = []
         for i in range(min(batch_size, len(img_paths) - b * batch_size)):
-            image, _ = preprocess_image(img_paths[b * batch_size + i], input_shape)
+            image, _ = preprocess_image(img_paths[b * batch_size + i], input_shape, augment_prob=0.)
             images.append(np.expand_dims(image, axis=0))
             paths.append(img_paths[b * batch_size + i])
         yield np.concatenate(images, axis=0), paths
