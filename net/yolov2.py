@@ -90,8 +90,6 @@ def _load_weights(layers, weights_path):
             read += size
 
     print("Weights ready ({}/{} read)".format(read, len(weights)))
-    if read != len(weights):
-        print("(warning) read count and total count do not match. Possibly an incorrect weights file.")
 
     return ops
 
@@ -460,5 +458,5 @@ def train(params):
                         val_writer.add_summary(val_summary)
                         val_writer.flush()
                         print("validation loss: {}".format(val_loss))
-                print("Epoch ({}/{}) completed.".format(epoch, epochs + 1))
+                print("Epoch ({}/{}) completed.".format(epoch, epochs))
     print("Done")
