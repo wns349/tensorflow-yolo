@@ -318,6 +318,7 @@ def test(params):
     input_c = int(params["input_c"])
     checkpoint_path = params["checkpoint_path"]
     pretrained_weights_path = params["pretrained_weights_path"]
+    cpu_only = bool(params["cpu_only"])
 
     # load images
     image_paths = yolo.load_image_paths(image_dir)
@@ -328,6 +329,8 @@ def test(params):
     # build network
     net = _create_full_network(len(anchors), len(class_names), False, input_shape=(input_h, input_w, input_c))
 
+    if cpu_only:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
 
@@ -385,6 +388,7 @@ def train(params):
     input_c = int(params["input_c"])
     epochs = int(params["epochs"])
     max_step = int(params["max_step"])
+    cpu_only = bool(params["cpu_only"])
 
     # prepare data
     train_annotations = yolo.parse_annotations(train_annotation_dir, train_image_dir)
@@ -394,6 +398,8 @@ def train(params):
     # build network
     net = _create_full_network(len(anchors), len(class_names), True, input_shape=(input_h, input_w, input_c))
 
+    if cpu_only:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
 
