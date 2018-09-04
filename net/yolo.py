@@ -2,10 +2,10 @@ import os
 import xml.etree.ElementTree as ET
 
 import cv2
+import imgaug as ia
 import numpy as np
 import sklearn.cluster
 from imgaug import augmenters as iaa
-import imgaug as ia
 from tqdm import tqdm
 
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 255, 0), (255, 0, 255)]
@@ -107,7 +107,7 @@ def preprocess_image(image_path, new_shape, objects=None, augment_prob=0.):
             ymax = obj[3] / image.shape[0] * new_shape[0]
             new_objects.append((xmin, ymin, xmax, ymax, obj[4]))
 
-        if np.random.uniform() <= augment_prob:
+        if np.random.uniform() < augment_prob:
             net_image, new_objects = augment_image(net_image, new_objects, new_shape)
 
     # For debug only
@@ -190,8 +190,8 @@ def draw_boxes(path_to_img, boxes, class_names):
     assert image is not None
     h, w = image.shape[0:2]
     for box in boxes:
-        tl = box.get_top_left(h, w)
-        br = box.get_bottom_right(h, w)
+        tl = np.maximum(box.get_top_left(h, w), 0)
+        br = np.maximum(box.get_bottom_right(h, w), 0)
         tl = (int(tl[0]), int(tl[1]))
         br = (int(br[0]), int(br[1]))
 
@@ -242,7 +242,7 @@ class BoundingBox(object):
         self.prob = prob
 
     def get_top_left(self, h=1., w=1.):
-        return np.maximum((self.x - self.w / 2.) * w, 0.), np.maximum((self.y - self.h / 2.) * h, 0.)
+        return (self.x - self.w / 2.) * w, (self.y - self.h / 2.) * h
 
     def get_bottom_right(self, h=1., w=1.):
-        return np.minimum((self.x + self.w / 2.) * w, w), np.minimum((self.y + self.h / 2.) * h, h)
+        return (self.x + self.w / 2.) * w, (self.y + self.h / 2.) * h

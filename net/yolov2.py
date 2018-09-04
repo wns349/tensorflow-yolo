@@ -126,6 +126,57 @@ def _find_bounding_boxes(out, anchors, threshold):
 def _create_loss_fn(batch_size, net, anchors, class_names):
     net_out = net[-1].out
     h, w = net_out.get_shape().as_list()[1:3]
+
+    cell_x = tf.to_float(tf.reshape(tf.tile(tf.range(h), [w]), (1, h, w, 1, 1)))
+    cell_y = tf.transpose(cell_x, (0, 2, 1, 3, 4))
+    cell_xy = tf.tile(tf.concat([cell_x, cell_y], -1), [batch_size, 1, 1, len(anchors), 1])
+    _anchors = np.reshape(anchors, [1, 1, 1, len(anchors), 2])
+
+    pred = tf.reshape(net_out, [-1, h, w, len(anchors), 5 + len(class_names)])
+    pred_xy = tf.sigmoid(pred[..., 0:2]) + cell_xy
+    pred_wh = tf.exp(pred[..., 2:4]) * _anchors
+    pred_obj = tf.expand_dims(tf.sigmoid(pred[..., 4]), axis=-1)
+    pred_class = pred[..., 5:]
+
+    # ground truth
+    gt = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors), 5 + len(class_names)])
+    gt_ij = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors)])
+    gt_i = tf.placeholder(dtype=np.float32, shape=[None, h, w])
+    placeholders = {
+        "gt": gt, "gt_ij": gt_ij, "gt_i": gt_i
+    }
+
+    gt_xy = gt[..., 0:2]
+    gt_wh = gt[..., 2:4]
+    gt_obj = tf.expand_dims(gt[..., 4], axis=-1)
+    gt_class = tf.argmax(gt[..., 5:], axis=-1)
+
+    mask_ij = tf.expand_dims(gt_ij, axis=-1)
+    mask_i = tf.expand_dims(gt_i, axis=-1)
+
+    loss_xy = 1. * tf.reduce_sum(mask_ij * tf.square(gt_xy - pred_xy)) / batch_size
+    loss_wh = 1. * tf.reduce_sum(mask_ij * tf.square(tf.sqrt(gt_wh) - tf.sqrt(pred_wh))) / batch_size
+    loss_obj = 5. * tf.reduce_sum(mask_ij * tf.square(gt_obj - pred_obj)) / batch_size
+    loss_noobj = 1. * tf.reduce_sum((1 - mask_ij) * tf.square(gt_obj - pred_obj)) / batch_size
+    loss_class = 1. * tf.reduce_sum(
+        mask_i * tf.nn.sparse_softmax_cross_entropy_with_logits(labels=gt_class, logits=pred_class))
+
+    loss = loss_xy + loss_wh + loss_obj + loss_noobj + loss_class
+
+    with tf.name_scope("losses"):
+        tf.summary.scalar("loss", loss)
+        tf.summary.scalar("loss_xy", loss_xy)
+        tf.summary.scalar("loss_wh", loss_wh)
+        tf.summary.scalar("loss_obj", loss_obj)
+        tf.summary.scalar("loss_noobj", loss_noobj)
+        tf.summary.scalar("loss_class", loss_class)
+
+    return loss, placeholders
+
+
+def _create_loss_fn2(batch_size, net, anchors, class_names):
+    net_out = net[-1].out
+    h, w = net_out.get_shape().as_list()[1:3]
     b, c = len(anchors), len(class_names)
 
     cell_h = tf.tile(tf.range(h), [w])
@@ -249,9 +300,9 @@ def _make_ground_truths(net, objects, anchors, class_names):
         else:
             best_box, best_iou, best_anchor_idx = None, -1, -1
 
-        _box = yolo.BoundingBox(0, 0, box.w, box.h)
+        _box = yolo.BoundingBox(output_w / 2., output_h / 2., box.w, box.h)
         for idx, anchor in enumerate(anchors):
-            _anchor_box = yolo.BoundingBox(0, 0, anchor[0], anchor[1])
+            _anchor_box = yolo.BoundingBox(output_w / 2., output_h / 2., anchor[0], anchor[1])
             iou = yolo.iou_score(_box, _anchor_box)
             if best_iou < iou:
                 best_iou = iou
