@@ -126,57 +126,6 @@ def _find_bounding_boxes(out, anchors, threshold):
 def _create_loss_fn(batch_size, net, anchors, class_names):
     net_out = net[-1].out
     h, w = net_out.get_shape().as_list()[1:3]
-
-    cell_x = tf.to_float(tf.reshape(tf.tile(tf.range(h), [w]), (1, h, w, 1, 1)))
-    cell_y = tf.transpose(cell_x, (0, 2, 1, 3, 4))
-    cell_xy = tf.tile(tf.concat([cell_x, cell_y], -1), [batch_size, 1, 1, len(anchors), 1])
-    _anchors = np.reshape(anchors, [1, 1, 1, len(anchors), 2])
-
-    pred = tf.reshape(net_out, [-1, h, w, len(anchors), 5 + len(class_names)])
-    pred_xy = tf.sigmoid(pred[..., 0:2]) + cell_xy
-    pred_wh = tf.exp(pred[..., 2:4]) * _anchors
-    pred_obj = tf.expand_dims(tf.sigmoid(pred[..., 4]), axis=-1)
-    pred_class = pred[..., 5:]
-
-    # ground truth
-    gt = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors), 5 + len(class_names)])
-    gt_ij = tf.placeholder(dtype=np.float32, shape=[None, h, w, len(anchors)])
-    gt_i = tf.placeholder(dtype=np.float32, shape=[None, h, w])
-    placeholders = {
-        "gt": gt, "gt_ij": gt_ij, "gt_i": gt_i
-    }
-
-    gt_xy = gt[..., 0:2]
-    gt_wh = gt[..., 2:4]
-    gt_obj = tf.expand_dims(gt[..., 4], axis=-1)
-    gt_class = tf.argmax(gt[..., 5:], axis=-1)
-
-    mask_ij = tf.expand_dims(gt_ij, axis=-1)
-    mask_i = tf.expand_dims(gt_i, axis=-1)
-
-    loss_xy = 1. * tf.reduce_sum(mask_ij * tf.square(gt_xy - pred_xy)) / batch_size
-    loss_wh = 1. * tf.reduce_sum(mask_ij * tf.square(tf.sqrt(gt_wh) - tf.sqrt(pred_wh))) / batch_size
-    loss_obj = 5. * tf.reduce_sum(mask_ij * tf.square(gt_obj - pred_obj)) / batch_size
-    loss_noobj = 1. * tf.reduce_sum((1 - mask_ij) * tf.square(gt_obj - pred_obj)) / batch_size
-    loss_class = 1. * tf.reduce_sum(
-        mask_i * tf.nn.sparse_softmax_cross_entropy_with_logits(labels=gt_class, logits=pred_class))
-
-    loss = loss_xy + loss_wh + loss_obj + loss_noobj + loss_class
-
-    with tf.name_scope("losses"):
-        tf.summary.scalar("loss", loss)
-        tf.summary.scalar("loss_xy", loss_xy)
-        tf.summary.scalar("loss_wh", loss_wh)
-        tf.summary.scalar("loss_obj", loss_obj)
-        tf.summary.scalar("loss_noobj", loss_noobj)
-        tf.summary.scalar("loss_class", loss_class)
-
-    return loss, placeholders
-
-
-def _create_loss_fn2(batch_size, net, anchors, class_names):
-    net_out = net[-1].out
-    h, w = net_out.get_shape().as_list()[1:3]
     b, c = len(anchors), len(class_names)
 
     cell_h = tf.tile(tf.range(h), [w])
@@ -277,9 +226,6 @@ def _make_ground_truths(net, objects, anchors, class_names):
     gt_ij = np.zeros(shape=[output_h, output_w, len(anchors)])
     gt_i = np.zeros(shape=[output_h, output_w])
 
-    stride_h = input_h / output_h
-    stride_w = input_w / output_w
-
     boxes = []
     for obj in objects:
         # xmin, ymin, xmax, ymax, name
@@ -287,8 +233,8 @@ def _make_ground_truths(net, objects, anchors, class_names):
         by = (obj[1] + obj[3]) * .5 / input_h * output_h
         bw = (obj[2] - obj[0]) / input_w * output_w
         bh = (obj[3] - obj[1]) / input_h * output_h
-        cx = int(bx // stride_w)
-        cy = int(by // stride_h)
+        cx = int(np.floor(bx))
+        cy = int(np.floor(by))
 
         boxes.append(yolo.BoundingBox(bx, by, bw, bh, cx, cy, class_names.index(obj[4])))
 
@@ -316,7 +262,7 @@ def _make_ground_truths(net, objects, anchors, class_names):
         gts[best_box.cy, best_box.cx, best_anchor_idx, 1] = best_box.y
         gts[best_box.cy, best_box.cx, best_anchor_idx, 2] = best_box.w
         gts[best_box.cy, best_box.cx, best_anchor_idx, 3] = best_box.h
-        gts[best_box.cy, best_box.cx, best_anchor_idx, 4] = best_iou
+        gts[best_box.cy, best_box.cx, best_anchor_idx, 4] = 1.
         gts[best_box.cy, best_box.cx, best_anchor_idx, 5 + best_box.class_idx] = 1
 
         gt_ij[best_box.cy, best_box.cx, best_anchor_idx] = 1
@@ -369,7 +315,7 @@ def test(params):
     input_c = int(params["input_c"])
     checkpoint_path = params["checkpoint_path"]
     pretrained_weights_path = params["pretrained_weights_path"]
-    cpu_only = bool(params["cpu_only"])
+    cpu_only = params["cpu_only"].lower() == "true"
 
     # load images
     image_paths = yolo.load_image_paths(image_dir)
@@ -439,7 +385,7 @@ def train(params):
     input_c = int(params["input_c"])
     epochs = int(params["epochs"])
     max_step = int(params["max_step"])
-    cpu_only = bool(params["cpu_only"])
+    cpu_only = params["cpu_only"].lower() == "true"
 
     # prepare data
     train_annotations = yolo.parse_annotations(train_annotation_dir, train_image_dir)

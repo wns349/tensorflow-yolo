@@ -52,4 +52,4 @@ if __name__ == "__main__":
     cfg.read(c.config)
     cfg = {s: _update_configs(dict(cfg.items(s)), c.config) for s in cfg.sections()}
 
-    _main(cfg, c.mode)
+    _main(cfg, c.mode.lower())
