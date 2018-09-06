@@ -38,7 +38,7 @@ Refer to `requirements.txt`
 
 
 ### TODO
-- Yolo V3
+- Yolo V3 (TRAIN|ANCHOR)
 
 ##### References
 I found the following projects/websites to be very helpful. Many thanks!

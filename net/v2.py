@@ -1,4 +1,3 @@
-import os
 import random
 
 import numpy as np
@@ -9,7 +8,9 @@ from .layers import conv2d_bn_act, input_layer, max_pool2d, route, reorg
 
 
 @staticmethod
-def create_full_network(num_anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
+def create_full_network(anchors, class_names, is_training, scope="yolo", input_shape=(416, 416, 3)):
+    num_anchors = len(anchors)
+    num_classes = len(class_names)
     tf.reset_default_graph()
     layers = []
     with tf.variable_scope(scope):
@@ -73,31 +74,22 @@ def load_weights(layers, weights_path):
             seen = np.fromfile(f, count=1, dtype=np.int32)
         print("SEEN: ", seen)
         weights = np.fromfile(f, dtype=np.float32)
-
-    variables = {v.op.name: v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="yolo")}
-    ops = []
-    read = 0
-    for layer in layers:
-        for variable_name in layer.variable_names:
-            var = variables[variable_name]
-            tokens = var.name.split("/")
-            size = np.prod(var.shape.as_list())
-            shape = var.shape.as_list()
-            if "kernel" in tokens[-1]:
-                shape = [shape[3], shape[2], shape[0], shape[1]]
-            value = np.reshape(weights[read: read + size], shape)
-            if "kernel" in tokens[-1]:
-                value = np.transpose(value, (2, 3, 1, 0))
-            ops.append(tf.assign(var, value, validate_shape=True))
-            read += size
-
-    print("Weights ready ({}/{} read)".format(read, len(weights)))
-
-    return ops
+    print("Found {} weight values.".format(len(weights)))
+    return base.load_weights(layers, weights)
 
 
 @staticmethod
-def find_bounding_boxes(out, anchors, threshold):
+def find_bounding_boxes(net_out, net, threshold, iou_threshold, anchors, class_names):
+    net_out = np.reshape(net_out,
+                         [-1, net_out.shape[1], net_out.shape[2], len(anchors), (5 + len(class_names))])
+    net_boxes = []
+    for out in net_out:
+        bounding_boxes = _find_bounding_boxes(out, anchors, threshold)
+        net_boxes.append(base.non_maximum_suppression(bounding_boxes, iou_threshold))
+    return net_boxes
+
+
+def _find_bounding_boxes(out, anchors, threshold):
     h, w = out.shape[0:2]
     no_b = len(anchors)
     bboxes = []
@@ -307,5 +299,3 @@ def generate_anchors(params):
     anchors = np.reshape(anchors, [-1])
 
     return anchors, class_names
-
-

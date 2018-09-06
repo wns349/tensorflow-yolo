@@ -6,11 +6,12 @@ import tensorflow as tf
 
 from . import base
 from . import v2
+from . import v3
 
 
 class Yolo(object):
     @abc.abstractmethod
-    def create_network(self, num_anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
+    def create_network(self, anchors, class_names, is_training, scope="yolo", input_shape=(416, 416, 3)):
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -18,7 +19,7 @@ class Yolo(object):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def find_bounding_boxes(self, out, anchors, threshold):
+    def find_bounding_boxes(self, out, net, threshold, iou_threshold, anchors, class_names):
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -59,7 +60,7 @@ class Yolo(object):
             return
 
         # build network
-        net = self.create_network(len(anchors), len(class_names), False, input_shape=(input_h, input_w, input_c))
+        net = self.create_network(anchors, class_names, False, input_shape=(input_h, input_w, input_c))
 
         if cpu_only:
             os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -82,12 +83,7 @@ class Yolo(object):
                 net_out = sess.run(net[-1].out, feed_dict={net[0].out: x_batch})
 
                 # post-process
-                net_boxes = []
-                net_out = np.reshape(net_out,
-                                     [-1, net_out.shape[1], net_out.shape[2], len(anchors), (5 + len(class_names))])
-                for out in net_out:
-                    bounding_boxes = self.find_bounding_boxes(out, anchors, threshold)
-                    net_boxes.append(base.non_maximum_suppression(bounding_boxes, iou_threshold))
+                net_boxes = self.find_bounding_boxes(net_out, net, threshold, iou_threshold, anchors, class_names)
 
                 for boxes, path in zip(net_boxes, paths):
                     # draw box on image
@@ -207,3 +203,9 @@ class YoloV2(Yolo):
     make_batch = v2.make_batch
     create_train_optimizer = v2.create_train_optimizer
     create_loss_fn = v2.create_loss_fn
+
+
+class YoloV3(Yolo):
+    create_network = v3.create_network
+    load_weights = v3.load_weights
+    find_bounding_boxes = v3.find_bounding_boxes

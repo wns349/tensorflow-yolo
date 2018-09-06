@@ -1,4 +1,4 @@
-from net.yolo import YoloV2
+from net.yolo import YoloV2, YoloV3
 import ast
 
 
@@ -16,6 +16,8 @@ def _main(cfg, mode):
     version = cfg["COMMON"]["version"]
     if version == "v2":
         yolo = YoloV2()
+    elif version == "v3":
+        yolo = YoloV3()
     else:
         raise ValueError("Unsupported version: {}".format(version))
 
@@ -45,9 +47,12 @@ if __name__ == "__main__":
     args.add_argument("--config", dest="config", help="Path to configuration file",
                       default=os.path.join(os.path.dirname(__file__), "config", "yolo_2.ini"))
     args.add_argument("--mode", dest="mode", help="Mode: (train|test|anchor)",
-                      default="train")
+                      default="anchor")
     c = args.parse_args()
-
+    # # DEBUG START
+    # c.config = os.path.join(os.path.dirname(__file__), "config", "yolo_2.ini")
+    # c.mode = "test"
+    # # DEBUG END
     cfg = configparser.ConfigParser()
     cfg.read(c.config)
     cfg = {s: _update_configs(dict(cfg.items(s)), c.config) for s in cfg.sections()}

@@ -5,6 +5,7 @@ import cv2
 import imgaug as ia
 import numpy as np
 import sklearn.cluster
+import tensorflow as tf
 from imgaug import augmenters as iaa
 from tqdm import tqdm
 
@@ -22,6 +23,29 @@ seq = iaa.Sequential([
 ])
 
 
+def load_weights(layers, weights):
+    variables = {v.op.name: v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="yolo")}
+    ops = []
+    read = 0
+    for layer in layers:
+        for variable_name in layer.variable_names:
+            var = variables[variable_name]
+            tokens = var.name.split("/")
+            size = np.prod(var.shape.as_list())
+            shape = var.shape.as_list()
+            if "kernel" in tokens[-1]:
+                shape = [shape[3], shape[2], shape[0], shape[1]]
+            value = np.reshape(weights[read: read + size], shape)
+            if "kernel" in tokens[-1]:
+                value = np.transpose(value, (2, 3, 1, 0))
+            ops.append(tf.assign(var, value, validate_shape=True))
+            read += size
+
+    print("Weights ready ({}/{} read)".format(read, len(weights)))
+
+    return ops
+
+
 def run_kmeans(data, num_anchors, tolerate, verbose=False):
     km = sklearn.cluster.KMeans(n_clusters=num_anchors, tol=tolerate, verbose=verbose)
     km.fit(data)
@@ -32,7 +56,7 @@ def load_checkpoint_by_path(saver, sess, checkpoint_path):
     try:
         saver.restore(sess, checkpoint_path)
         return True
-    except ValueError as e:
+    except Exception as e:
         print("Failed to load {}: {}".format(checkpoint_path, str(e)))
         return False
 
