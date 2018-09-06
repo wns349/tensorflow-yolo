@@ -1,4 +1,4 @@
-from net import yolov2 as v2
+from net.yolo import YoloV2
 import ast
 
 
@@ -15,7 +15,7 @@ def _update_configs(configs, configs_path):
 def _main(cfg, mode):
     version = cfg["COMMON"]["version"]
     if version == "v2":
-        yolo = v2
+        yolo = YoloV2()
     else:
         raise ValueError("Unsupported version: {}".format(version))
 

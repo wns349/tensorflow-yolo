@@ -3,7 +3,7 @@ import os
 import numpy as np
 import tensorflow as tf
 
-from . import yolo
+from . import base
 from .layers import conv2d_bn_act, input_layer, route, detection_layer, yolo_layer, shortcut, upsample
 
 
@@ -103,7 +103,7 @@ def load_weights(layers, weights_path):
 
     print("Found {} weight values.".format(len(weights)))
 
-    return yolo.load_weights(layers, weights)
+    return base.load_weights(layers, weights)
 
 
 def find_bounding_boxes(out, anchors, threshold):
@@ -116,8 +116,8 @@ def find_bounding_boxes(out, anchors, threshold):
         for cw in range(w):
             for b in range(no_b):
                 # calculate p(class|obj)
-                prob_obj = yolo.sigmoid(out[cy, cw, b, 4])
-                prob_classes = yolo.sigmoid(out[cy, cw, b, 5:])
+                prob_obj = base.sigmoid(out[cy, cw, b, 4])
+                prob_classes = base.sigmoid(out[cy, cw, b, 5:])
                 class_idx = np.argmax(prob_classes)
                 class_prob = prob_classes[class_idx]
                 p = prob_obj
@@ -125,9 +125,9 @@ def find_bounding_boxes(out, anchors, threshold):
                     continue
 
                 coords = out[cy, cw, b, 0:4]
-                bbox = yolo.BoundingBox()
-                bbox.x = (yolo.sigmoid(coords[0]) + cw) / w
-                bbox.y = (yolo.sigmoid(coords[1]) + cy) / h
+                bbox = base.BoundingBox()
+                bbox.x = (base.sigmoid(coords[0]) + cw) / w
+                bbox.y = (base.sigmoid(coords[1]) + cy) / h
                 bbox.w = (anchors[b][0] * np.exp(coords[2])) / w
                 bbox.h = (anchors[b][1] * np.exp(coords[3])) / h
                 bbox.class_idx = class_idx
@@ -136,7 +136,7 @@ def find_bounding_boxes(out, anchors, threshold):
     return bboxes
 
 
-class YoloV3(yolo.Yolo):
+class YoloV3(base.Yolo):
     def __init__(self):
         super().__init__()
 
@@ -159,7 +159,7 @@ class YoloV3(yolo.Yolo):
             raise ValueError("Path to either pretrained weights or checkpoint file is required.")
 
         # load images
-        test_img_paths = yolo.load_image_paths(test_img_dir)
+        test_img_paths = base.load_image_paths(test_img_dir)
         if len(test_img_paths) == 0:
             print("No test images found in {}".format(test_img_dir))
             return
@@ -181,17 +181,17 @@ class YoloV3(yolo.Yolo):
             # run prediction
             input_shape = tuple(self.net[0].out.get_shape().as_list()[1:3])
 
-            test_batches = yolo.generate_test_batch(test_img_paths, batch_size, input_shape)
+            test_batches = base.generate_test_batch(test_img_paths, batch_size, input_shape)
             for x_batch, paths in test_batches:
                 net_out = sess.run(self.net[-1].out, feed_dict={self.net[0].out: x_batch})
                 net_boxes = self.postprocess(net_out, threshold, iou_threshold)
                 for boxes, path in zip(net_boxes, paths):
                     # draw box on image
-                    new_img = yolo.draw_boxes(path, boxes, self.names)
+                    new_img = base.draw_boxes(path, boxes, self.names)
                     # write to file
                     file_name, file_ext = os.path.splitext(os.path.basename(path))
                     out_path = os.path.join(out_dir, "{}_out{}".format(file_name, file_ext))
-                    yolo.save_image(new_img, out_path)
+                    base.save_image(new_img, out_path)
                     print("{}: Found {} objects. Saved to {}".format(file_name, len(boxes), out_path))
 
     def postprocess(self, net_out, threshold, iou_threshold):
@@ -204,7 +204,7 @@ class YoloV3(yolo.Yolo):
                 l_out = np.reshape(out[idx:idx + dim, ...], [l.h, l.w, l.b, -1])
                 boxes.extend(find_bounding_boxes(l_out, l.anchors, threshold))
                 idx += dim
-            results.append(yolo.non_maximum_suppression(boxes, iou_threshold))
+            results.append(base.non_maximum_suppression(boxes, iou_threshold))
         return results
 
 

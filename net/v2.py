@@ -4,11 +4,12 @@ import random
 import numpy as np
 import tensorflow as tf
 
-from . import yolo
+from . import base
 from .layers import conv2d_bn_act, input_layer, max_pool2d, route, reorg
 
 
-def _create_full_network(num_anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
+@staticmethod
+def create_full_network(num_anchors, num_classes, is_training, scope="yolo", input_shape=(416, 416, 3)):
     tf.reset_default_graph()
     layers = []
     with tf.variable_scope(scope):
@@ -57,7 +58,8 @@ def _create_full_network(num_anchors, num_classes, is_training, scope="yolo", in
     return layers
 
 
-def _load_weights(layers, weights_path):
+@staticmethod
+def load_weights(layers, weights_path):
     print("Reading pre-trained weights from {}".format(weights_path))
 
     # header
@@ -94,7 +96,8 @@ def _load_weights(layers, weights_path):
     return ops
 
 
-def _find_bounding_boxes(out, anchors, threshold):
+@staticmethod
+def find_bounding_boxes(out, anchors, threshold):
     h, w = out.shape[0:2]
     no_b = len(anchors)
     bboxes = []
@@ -103,8 +106,8 @@ def _find_bounding_boxes(out, anchors, threshold):
         for cw in range(w):
             for b in range(no_b):
                 # calculate p(class|obj)
-                prob_obj = yolo.sigmoid(out[cy, cw, b, 4])
-                prob_classes = yolo.softmax(out[cy, cw, b, 5:])
+                prob_obj = base.sigmoid(out[cy, cw, b, 4])
+                prob_classes = base.softmax(out[cy, cw, b, 5:])
                 class_idx = np.argmax(prob_classes)
                 class_prob = prob_classes[class_idx]
                 p = prob_obj * class_prob
@@ -112,9 +115,9 @@ def _find_bounding_boxes(out, anchors, threshold):
                     continue
 
                 coords = out[cy, cw, b, 0:4]
-                bbox = yolo.BoundingBox()
-                bbox.x = (yolo.sigmoid(coords[0]) + cw) / w
-                bbox.y = (yolo.sigmoid(coords[1]) + cy) / h
+                bbox = base.BoundingBox()
+                bbox.x = (base.sigmoid(coords[0]) + cw) / w
+                bbox.y = (base.sigmoid(coords[1]) + cy) / h
                 bbox.w = (anchors[b][0] * np.exp(coords[2])) / w
                 bbox.h = (anchors[b][1] * np.exp(coords[3])) / h
                 bbox.class_idx = class_idx
@@ -123,7 +126,8 @@ def _find_bounding_boxes(out, anchors, threshold):
     return bboxes
 
 
-def _create_loss_fn(batch_size, net, anchors, class_names):
+@staticmethod
+def create_loss_fn(batch_size, net, anchors, class_names):
     net_out = net[-1].out
     h, w = net_out.get_shape().as_list()[1:3]
     b, c = len(anchors), len(class_names)
@@ -180,13 +184,15 @@ def _create_loss_fn(batch_size, net, anchors, class_names):
     return loss, placeholders
 
 
-def _create_train_optimizer(loss_fn, learning_rate):
+@staticmethod
+def create_train_optimizer(loss_fn, learning_rate):
     extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(extra_update_ops):
         return tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss_fn)
 
 
-def _make_batch(net, annotations, batch_size, anchors, class_names, augment_prob):
+@staticmethod
+def make_batch(net, annotations, batch_size, anchors, class_names, augment_prob):
     if len(annotations) == 0:
         yield [], {}
     elif len(annotations) < batch_size:
@@ -204,7 +210,7 @@ def _make_batch(net, annotations, batch_size, anchors, class_names, augment_prob
         net_placeholders = {}
         for i in range(batch_size):
             img_path, img_objects = annotations[batch * batch_size + i]
-            net_image, objects = yolo.preprocess_image(img_path, (input_h, input_w, input_c), img_objects, augment_prob)
+            net_image, objects = base.preprocess_image(img_path, (input_h, input_w, input_c), img_objects, augment_prob)
             net_placeholder = _make_ground_truths(net, objects, anchors, class_names)
 
             net_images.append(np.expand_dims(net_image, axis=0))
@@ -236,7 +242,7 @@ def _make_ground_truths(net, objects, anchors, class_names):
         cx = int(np.floor(bx))
         cy = int(np.floor(by))
 
-        boxes.append(yolo.BoundingBox(bx, by, bw, bh, cx, cy, class_names.index(obj[4])))
+        boxes.append(base.BoundingBox(bx, by, bw, bh, cx, cy, class_names.index(obj[4])))
 
     best_boxes = {}
     for box in boxes:
@@ -246,10 +252,10 @@ def _make_ground_truths(net, objects, anchors, class_names):
         else:
             best_box, best_iou, best_anchor_idx = None, -1, -1
 
-        _box = yolo.BoundingBox(output_w / 2., output_h / 2., box.w, box.h)
+        _box = base.BoundingBox(output_w / 2., output_h / 2., box.w, box.h)
         for idx, anchor in enumerate(anchors):
-            _anchor_box = yolo.BoundingBox(output_w / 2., output_h / 2., anchor[0], anchor[1])
-            iou = yolo.iou_score(_box, _anchor_box)
+            _anchor_box = base.BoundingBox(output_w / 2., output_h / 2., anchor[0], anchor[1])
+            iou = base.iou_score(_box, _anchor_box)
             if best_iou < iou:
                 best_iou = iou
                 best_box = box
@@ -275,6 +281,7 @@ def _make_ground_truths(net, objects, anchors, class_names):
     }
 
 
+@staticmethod
 def generate_anchors(params):
     num_anchors = int(params["num_anchors"])
     image_dir = params["image_dir"]
@@ -284,7 +291,7 @@ def generate_anchors(params):
     input_w = int(params["input_w"])
     input_h = int(params["input_h"])
 
-    annotations = yolo.parse_annotations(annotation_dir, image_dir, normalize=True)
+    annotations = base.parse_annotations(annotation_dir, image_dir, normalize=True)
     print("{} annotations found.".format(len(annotations)))
     class_names = set()
     data = []
@@ -295,171 +302,10 @@ def generate_anchors(params):
             h = float(o[3] - o[1])
             data.append([w, h])
             class_names.add(o[-1])
-    anchors = yolo.run_kmeans(data, num_anchors, tolerate)
+    anchors = base.run_kmeans(data, num_anchors, tolerate)
     anchors = [[a[0] * input_w / stride, a[1] * input_h / stride] for a in anchors]
     anchors = np.reshape(anchors, [-1])
 
     return anchors, class_names
 
 
-def test(params):
-    image_dir = params["image_dir"]
-    out_dir = params["out_dir"]
-    batch_size = int(params["batch_size"])
-    threshold = float(params["threshold"])
-    iou_threshold = float(params["iou_threshold"])
-    anchors = np.reshape(params["anchors"], [-1, 2])
-    class_names = params["class_names"]
-    input_h = int(params["input_h"])
-    input_w = int(params["input_w"])
-    input_c = int(params["input_c"])
-    checkpoint_path = params["checkpoint_path"]
-    pretrained_weights_path = params["pretrained_weights_path"]
-    cpu_only = params["cpu_only"].lower() == "true"
-
-    # load images
-    image_paths = yolo.load_image_paths(image_dir)
-    if len(image_paths) == 0:
-        print("No test images found in {}".format(image_dir))
-        return
-
-    # build network
-    net = _create_full_network(len(anchors), len(class_names), False, input_shape=(input_h, input_w, input_c))
-
-    if cpu_only:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-
-        # load checkpoint
-        saver = tf.train.Saver()
-        if not yolo.load_checkpoint_by_path(saver, sess, checkpoint_path):
-            # load pre-trained weights
-            ops = _load_weights(net, pretrained_weights_path)
-            sess.run(ops)
-            print("Pre-trained weights loaded.")
-        else:
-            print("Checkpoint {} restored.".format(checkpoint_path))
-
-        input_shape = tuple(net[0].out.get_shape().as_list()[1:4])
-        test_batches = yolo.generate_test_batch(image_paths, batch_size, input_shape)
-        for x_batch, paths in test_batches:  # run batch
-            net_out = sess.run(net[-1].out, feed_dict={net[0].out: x_batch})
-
-            # post-process
-            net_boxes = []
-            net_out = np.reshape(net_out,
-                                 [-1, net_out.shape[1], net_out.shape[2], len(anchors), (5 + len(class_names))])
-            for out in net_out:
-                bounding_boxes = _find_bounding_boxes(out, anchors, threshold)
-                net_boxes.append(yolo.non_maximum_suppression(bounding_boxes, iou_threshold))
-
-            for boxes, path in zip(net_boxes, paths):
-                # draw box on image
-                new_img = yolo.draw_boxes(path, boxes, class_names)
-                # write to file
-                file_name, file_ext = os.path.splitext(os.path.basename(path))
-                out_path = os.path.join(out_dir, "{}_out{}".format(file_name, file_ext))
-                yolo.save_image(new_img, out_path)
-                print("{}: Found {} objects. Saved to {}".format(file_name, len(boxes), out_path))
-        print("Done")
-
-
-def train(params):
-    train_image_dir = params["image_dir"]
-    train_annotation_dir = params["annotation_dir"]
-    val_image_dir = params["val_image_dir"]
-    val_annotation_dir = params["val_annotation_dir"]
-    batch_size = int(params["batch_size"])
-    learning_rate = float(params["learning_rate"])
-    augment_prob = float(params["augment_probability"])
-    checkpoint_prefix = params["checkpoint_prefix"]
-    checkpoint_dir = params["checkpoint_dir"]
-    checkpoint_step = int(params["checkpoint_step"])
-    pretrained_weights_path = params["pretrained_weights_path"]
-    tensorboard_log_dir = params["tensorboard_log_dir"]
-    anchors = np.reshape(params["anchors"], [-1, 2])
-    class_names = params["class_names"]
-    input_h = int(params["input_h"])
-    input_w = int(params["input_w"])
-    input_c = int(params["input_c"])
-    epochs = int(params["epochs"])
-    max_step = int(params["max_step"])
-    cpu_only = params["cpu_only"].lower() == "true"
-
-    # prepare data
-    train_annotations = yolo.parse_annotations(train_annotation_dir, train_image_dir)
-    assert len(train_annotations) > 0
-    val_annotations = yolo.parse_annotations(val_annotation_dir, val_image_dir)
-
-    # build network
-    net = _create_full_network(len(anchors), len(class_names), True, input_shape=(input_h, input_w, input_c))
-
-    if cpu_only:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-
-        # create loss function
-        loss, placeholders = _create_loss_fn(batch_size, net, anchors, class_names)
-        train_op = _create_train_optimizer(loss, learning_rate)
-        saver = tf.train.Saver()
-        with tf.Session() as sess:
-            tf_summary = tf.summary.merge_all()
-            train_writer = tf.summary.FileWriter(os.path.join(tensorboard_log_dir, "train"), sess.graph)
-            val_writer = tf.summary.FileWriter(os.path.join(tensorboard_log_dir, "validation"), sess.graph)
-            sess.run(tf.global_variables_initializer())
-
-            # load pre-trained weights/checkpoint
-            step = yolo.load_checkpoint(saver, sess, checkpoint_dir, checkpoint_prefix)
-            if step < 0:
-                # load pre-trained weights
-                ops = _load_weights(net, pretrained_weights_path)
-                sess.run(ops)
-                print("Pre-trained weights loaded.")
-                step = 0
-                yolo.save_checkpoint(saver, sess, checkpoint_dir, checkpoint_prefix, step)
-            else:
-                print("Checkpoint restored. step:{}".format(step))
-
-            # make train batch
-            train_loss_mva = None
-            for epoch in range(1, epochs + 1):
-                if 0 <= max_step < step:
-                    break
-                batches = _make_batch(net, train_annotations, batch_size, anchors, class_names, augment_prob)
-                for feed_images, feed_gts in batches:
-                    step += 1
-                    if 0 <= max_step < step:
-                        break
-                    feed_dict = {placeholders[key]: feed_gts[key] for key in placeholders}
-                    feed_dict[net[0].out] = feed_images
-                    _, summary, train_loss = sess.run([train_op, tf_summary, loss], feed_dict=feed_dict)
-
-                    train_writer.add_summary(summary, step)
-                    train_writer.flush()
-                    train_loss_mva = train_loss_mva * 0.9 + train_loss * 0.1 if train_loss_mva is not None else train_loss
-                    print("step {} ({}/{}): {} (moving average: {})".format(step, epoch, epochs, train_loss,
-                                                                            train_loss_mva))
-                    if step > 0 and step % checkpoint_step == 0:
-                        yolo.save_checkpoint(saver, sess, checkpoint_dir, checkpoint_prefix, step)
-
-                        # validation
-                        val_batches = _make_batch(net, val_annotations, batch_size, anchors, class_names, 0)
-                        val_total = 0
-                        val_count = 0
-                        for val_feed_images, val_feed_gts in val_batches:
-                            val_feed_dict = {placeholders[key]: val_feed_gts[key] for key in placeholders}
-                            val_feed_dict[net[0].out] = val_feed_images
-                            val_loss = sess.run(loss, feed_dict=val_feed_dict)
-                            val_total += float(val_loss)
-                            val_count += 1
-                        val_loss = val_total / val_count
-                        val_summary = tf.Summary(value=[
-                            tf.Summary.Value(tag="loss", simple_value=val_loss),
-                        ])
-                        val_writer.add_summary(val_summary)
-                        val_writer.flush()
-                        print("validation loss: {}".format(val_loss))
-                print("Epoch ({}/{}) completed.".format(epoch, epochs))
-    print("Done")
