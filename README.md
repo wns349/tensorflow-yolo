@@ -3,17 +3,12 @@ Python + TensorFlow implementation of YOLO (You Only Look Once).
 
 ### Requirements
 Refer to `requirements.txt`
-- Python 3
-- Numpy
-- OpenCV
-- TensorFlow
 
 
 ### YOLO Networks
 
-For the time being, I've only impelemented yolo network for [tiny-yolo-voc](https://github.com/pjreddie/darknet/blob/master/cfg/yolov2-tiny-voc.cfg) and [yolov2](https://github.com/pjreddie/darknet/blob/master/cfg/yolov2.cfg).
-
-A pre-trained weights file can be downloaded [here](https://pjreddie.com/media/files/yolov2-tiny-voc.weights) and [here](https://pjreddie.com/media/files/yolov2.weights), depending on the network.
+- Yolo V2: [config](https://github.com/pjreddie/darknet/blob/master/cfg/yolov2.cfg), [weights](https://pjreddie.com/media/files/yolov2.weights)
+- Yolo V3: [config](), [weights]()
 
 ### Quick Start
 
@@ -29,19 +24,21 @@ A pre-trained weights file can be downloaded [here](https://pjreddie.com/media/f
 
 2. Download pre-trained weights file
 
-    Download and keep it under `/bin` directory. (or anywhere else you'd like.)
+3. Update config file in `config/`
+    - `yolo_2.ini`: Use this for Yolo V2
+    - `yolo_3.ini`: Use this for Yolo V3
 
-3. Run prediction
-
+4. Run `launcher.py`
     ```bash
-    $ python ./predict.py --img_dir ./img --out_dir ./out --weights ./bin/yolov2.weights --names ./resource/coco.names --anchors ./resource/yolov2-coco.anchors --network v2 --threshold 0.5 --iou_threshold 0.5
+    $ python launcher.py --config PAHT_TO_CONFIG_FILE --mode (TRAIN|TEST|ANCHOR)
     ```
 
-    After a successful inference, a resulting image with bounding boxes is saved as `./out`.
+    - `config`: path to configuration file
+    - `mode`: _train_, _anchor_, or _test_
 
 
 ### TODO
-- Train custom objects for detection
+- Yolo V3 (TRAIN|ANCHOR)
 
 ##### References
 I found the following projects/websites to be very helpful. Many thanks!
@@ -50,4 +47,3 @@ I found the following projects/websites to be very helpful. Many thanks!
 - [Darkflow](https://github.com/thtrieu/darkflow/)
 - [MLBLR#yolov2](https://mlblr.com/includes/mlai/index.html#yolov2)
 - [Implementing YOLO v3 in Tensorflow(TF-Slim)](https://github.com/mystic123/tensorflow-yolo-v3)
-- [Training Object Detection (YOLOv2) from scratch...](https://towardsdatascience.com/training-object-detection-yolov2-from-scratch-using-cyclic-learning-rates-b3364f7e4755)
