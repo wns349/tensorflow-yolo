@@ -62,6 +62,10 @@ class conv2d_bn_act(object):
             self.variable_names.append("{}/{}/bias".format(scope, variable_prefix))
         self.variable_names.append("{}/{}/kernel".format(scope, variable_prefix))
 
+    @staticmethod
+    def reset():
+        conv2d_bn_act.name_count = 0
+
 
 class max_pool2d(object):
     def __init__(self, prev, kernel_size, stride=2):

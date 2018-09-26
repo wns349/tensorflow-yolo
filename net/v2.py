@@ -11,6 +11,7 @@ from .layers import conv2d_bn_act, input_layer, max_pool2d, route, reorg
 def create_full_network(anchors, class_names, is_training, scope="yolo", input_shape=(416, 416, 3)):
     num_anchors = len(anchors)
     num_classes = len(class_names)
+    conv2d_bn_act.reset()
     tf.reset_default_graph()
     layers = []
     with tf.variable_scope(scope):
