@@ -123,7 +123,7 @@ class Yolo(object):
         val_annotations = base.parse_annotations(val_annotation_dir, val_image_dir)
 
         # build network
-        net = self.create_network(len(anchors), len(class_names), True, input_shape=(input_h, input_w, input_c))
+        net = self.create_network(anchors, class_names, True, input_shape=(input_h, input_w, input_c))
 
         if cpu_only:
             os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
