@@ -9,6 +9,7 @@ from .layers import conv2d_bn_act, input_layer, route, detection_layer, yolo_lay
 def create_network(anchors, class_names, is_training, scope="yolo", input_shape=(416, 416, 3)):
     num_classes = len(class_names)
     anchors = np.reshape(anchors, [3, -1, 2])[::-1, :, :]  # reverse it for yolo layers
+    conv2d_bn_act.reset()
     tf.reset_default_graph()
     layers = []
 
