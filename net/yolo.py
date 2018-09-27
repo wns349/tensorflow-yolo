@@ -68,7 +68,7 @@ class Yolo(object):
             sess.run(tf.global_variables_initializer())
 
             # load checkpoint
-            saver = tf.train.Saver(var_list=tf.trainable_variables())
+            saver = tf.train.Saver()
             if not base.load_checkpoint_by_path(saver, sess, checkpoint_path):
                 # load pre-trained weights
                 ops = self.load_weights(net, pretrained_weights_path)
@@ -133,7 +133,7 @@ class Yolo(object):
             # create loss function
             loss, placeholders = self.create_loss_fn(batch_size, net, anchors, class_names)
             train_op = self.create_train_optimizer(loss, learning_rate)
-            saver = tf.train.Saver(var_list=tf.trainable_variables())
+            saver = tf.train.Saver()
             with tf.Session() as sess:
                 tf_summary = tf.summary.merge_all()
                 train_writer = tf.summary.FileWriter(os.path.join(tensorboard_log_dir, "train"), sess.graph)
