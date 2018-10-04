@@ -221,8 +221,8 @@ def draw_boxes(path_to_img, boxes, class_names):
 
         cv2.rectangle(image, tl, br, COLORS[box.class_idx % len(COLORS)], thickness=3)
         class_name = class_names[box.class_idx]
-        cv2.putText(image, "{} {:.3f}".format(class_name, box.prob), (tl[0], tl[1] - 10), \
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[box.class_idx % len(COLORS)], thickness=1)
+        cv2.putText(image, "{} {:.3f}".format(class_name, box.prob), (tl[0], tl[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    COLORS[box.class_idx % len(COLORS)], thickness=1)
     return image
 
 
@@ -237,7 +237,7 @@ def load_checkpoint(saver, sess, checkpoint_dir, checkpoint_prefix):
         return -1
 
     try:
-        metas.sort(reverse=True)
+        metas.sort(key=lambda x: int((os.path.splitext(x)[0]).split("-")[1]), reverse=True)
         checkpoint_path = os.path.join(checkpoint_dir, os.path.splitext(metas[0])[0])
         name = os.path.splitext(os.path.basename(checkpoint_path))[0]
         step = int(name.split("-")[1])
