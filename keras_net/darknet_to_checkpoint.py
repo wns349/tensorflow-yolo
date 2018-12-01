@@ -1,6 +1,6 @@
 import tensorflow as tf
-from tensorflow.python.keras.models import Sequential, Model
-from tensorflow.python.keras.layers import InputLayer, Conv2D, BatchNormalization, LeakyReLU, MaxPool2D, Lambda, \
+from tensorflow.python.keras.models import Model
+from tensorflow.python.keras.layers import Conv2D, BatchNormalization, LeakyReLU, MaxPool2D, Lambda, \
     Concatenate, Input
 from tensorflow.python.keras import backend as K
 import numpy as np
@@ -22,7 +22,7 @@ def get_variable_names(layer, type=None, has_bias=False):
     return names
 
 
-def build_feature_extractor_full_yolo(input_layer, scope="yolo", variable_placeholder=[]):
+def build_feature_extractor_full_yolo(input_layer, scope="yolo", variable_placeholder=[], trainable=True):
     with tf.variable_scope(scope):
         # define helper methods
         def conv2d_bn_leaky(_prev, _filter_size, _kernel_size, _strides):
@@ -31,8 +31,9 @@ def build_feature_extractor_full_yolo(input_layer, scope="yolo", variable_placeh
                            strides=_strides,
                            padding="SAME",
                            use_bias=False,
+                           trainable=trainable,
                            activation=None)(_prev)
-            _bn = BatchNormalization(momentum=0.9, epsilon=1e-5)(_conv)
+            _bn = BatchNormalization(momentum=0.9, epsilon=1e-5, trainable=trainable)(_conv)
             _leaky = LeakyReLU(alpha=0.1)(_bn)
 
             variable_placeholder.extend(get_variable_names(_bn, "bn"))
@@ -121,66 +122,48 @@ def load_darknet_weights(model, variable_placeholder, weights_path):
     print("Weights ({}/{} read)".format(read, len(weights)))
 
 
-def sigmoid(x):
-    return 1. / (1. + np.exp(-x))
+def test_model(model, img_path):
+    class BoundingBox(object):
+        def __init__(self, x=0., y=0., w=0., h=0., cx=0, cy=0, class_idx=-1, prob=-1.):
+            self.x = x
+            self.y = y
+            self.w = w
+            self.h = h
+            self.cx = cx
+            self.cy = cy
+            self.class_idx = class_idx
+            self.prob = prob
 
+        def get_top_left(self, h=1., w=1.):
+            return (self.x - self.w / 2.) * w, (self.y - self.h / 2.) * h
 
-def softmax(x):
-    e_x = np.exp(x - np.max(x))
-    return e_x / e_x.sum()
+        def get_bottom_right(self, h=1., w=1.):
+            return (self.x + self.w / 2.) * w, (self.y + self.h / 2.) * h
 
+    def sigmoid(x):
+        return 1. / (1. + np.exp(-x))
 
-class BoundingBox(object):
-    def __init__(self, x=0., y=0., w=0., h=0., cx=0, cy=0, class_idx=-1, prob=-1.):
-        self.x = x
-        self.y = y
-        self.w = w
-        self.h = h
-        self.cx = cx
-        self.cy = cy
-        self.class_idx = class_idx
-        self.prob = prob
+    def softmax(x):
+        e_x = np.exp(x - np.max(x))
+        return e_x / e_x.sum()
 
-    def get_top_left(self, h=1., w=1.):
-        return (self.x - self.w / 2.) * w, (self.y - self.h / 2.) * h
+    def iou_score(box1, box2):
+        box1_min, box1_max = box1.get_top_left(), box1.get_bottom_right()
+        box1_area = box1.w * box1.h
+        box2_min, box2_max = box2.get_top_left(), box2.get_bottom_right()
+        box2_area = box2.w * box2.h
 
-    def get_bottom_right(self, h=1., w=1.):
-        return (self.x + self.w / 2.) * w, (self.y + self.h / 2.) * h
+        intersect_min = np.maximum(box1_min, box2_min)
+        intersect_max = np.minimum(box1_max, box2_max)
+        intersect_wh = np.maximum(intersect_max - intersect_min, 0)
+        intersect_area = intersect_wh[0] * intersect_wh[1]
+        union_area = np.maximum(box1_area + box2_area - intersect_area, 1e-8)
 
-
-def iou_score(box1, box2):
-    box1_min, box1_max = box1.get_top_left(), box1.get_bottom_right()
-    box1_area = box1.w * box1.h
-    box2_min, box2_max = box2.get_top_left(), box2.get_bottom_right()
-    box2_area = box2.w * box2.h
-
-    intersect_min = np.maximum(box1_min, box2_min)
-    intersect_max = np.minimum(box1_max, box2_max)
-    intersect_wh = np.maximum(intersect_max - intersect_min, 0)
-    intersect_area = intersect_wh[0] * intersect_wh[1]
-    union_area = np.maximum(box1_area + box2_area - intersect_area, 1e-8)
-
-    return intersect_area / union_area
-
-
-if __name__ == '__main__':
-    variable_placeholder = []
-    input_layer = Input(shape=[416, 416, 3])
-    feature_extractor = build_feature_extractor_full_yolo(input_layer, variable_placeholder=variable_placeholder)
-    output_layer = build_output_layer(feature_extractor, num_anchors=5, num_classes=80,
-                                      variable_placeholder=variable_placeholder)
-
-    model = Model([input_layer], [output_layer])
-    print(model.summary())
-    print("variables: ", len(variable_placeholder))
-    load_darknet_weights(model, variable_placeholder, "../bin/yolov2.weights")
-
-    model.save_weights("./checkpoints/full-yolov2-coco.weights")
+        return intersect_area / union_area
 
     import cv2
-
     # read, preprocess
-    org_img = cv2.imread("../img/dog.jpg")
+    org_img = cv2.imread(img_path)
     img = cv2.resize(org_img, (416, 416))
     img = img[:, :, ::-1]
     img = img / 255.
@@ -239,6 +222,20 @@ if __name__ == '__main__':
         print(box.prob)
     cv2.imshow("img", org_img)
     cv2.waitKey(0)
-    # print(out)
 
-    # plot_model(model, "out.png", show_shapes=True)
+
+if __name__ == '__main__':
+    variable_placeholder = []
+    input_layer = Input(shape=[416, 416, 3])
+    feature_extractor = build_feature_extractor_full_yolo(input_layer, variable_placeholder=variable_placeholder)
+    output_layer = build_output_layer(feature_extractor, num_anchors=5, num_classes=80,
+                                      variable_placeholder=variable_placeholder)
+
+    model = Model([input_layer], [output_layer])
+    print(model.summary())
+    print("variables: ", len(variable_placeholder))
+    load_darknet_weights(model, variable_placeholder, "../bin/yolov2.weights")
+
+    model.save_weights("./checkpoints/full-yolov2-coco")
+
+    # test_model(model, "../img/dog.jpg")
