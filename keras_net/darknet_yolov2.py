@@ -119,6 +119,8 @@ def build_loss_fn(anchors):
         # y_true: [None, 13, 13, b * (5 + c)]
         print("Loss: " , y_true.get_shape().as_list())
         print("Pred: ", y_pred.get_shape().as_list())
-        return K.mean(y_true - y_pred)
+        t =  K.mean(y_true - y_pred)
+        print(t)
+        return t
 
     return loss_fn
