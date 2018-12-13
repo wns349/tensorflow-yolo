@@ -4,6 +4,7 @@ import random
 from keras_net import darknet_yolov2
 from tensorflow.python.keras.optimizers import Adam
 import os
+import tensorflow as tf
 from tqdm import tqdm
 import xml.etree.ElementTree as ET
 import cv2
@@ -286,12 +287,14 @@ def main():
     generator = batch_gen(input_tensor, output_tensor, train_annotations, batch_size, anchors, class_names,
                           augment_prob)
 
-    optimizer = Adam(lr=1e-3)
-    model.compile(optimizer=optimizer, loss=darknet_yolov2.build_loss_fn(anchors))
+    # optimizer = Adam(lr=1e-3)
+    optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+    model.compile(optimizer=optimizer, loss=darknet_yolov2.build_loss_fn(anchors, class_names))
     model.fit_generator(generator, steps_per_epoch=np.ceil(len(train_annotation_dir) / batch_size), epochs=10)
 
     # test_model(model, "../img/dog.jpg")
 
 
 if __name__ == '__main__':
+    tf.enable_eager_execution()
     main()

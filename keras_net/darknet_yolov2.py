@@ -112,15 +112,51 @@ def _build_body(input_layer, trainable):
     return x
 
 
-def build_loss_fn(anchors):
+def build_loss_fn(anchors, class_names):
     b = len(anchors)
+    c = len(class_names)
 
     def loss_fn(y_true, y_pred):
         # y_true: [None, 13, 13, b * (5 + c)]
-        print("Loss: " , y_true.get_shape().as_list())
-        print("Pred: ", y_pred.get_shape().as_list())
-        t =  K.mean(y_true - y_pred)
-        print(t)
+        h, w = y_pred.get_shape().as_list()[1:3]
+        gt = K.reshape(y_true, [-1, h, w, b, 5 + c])
+        pred = K.reshape(y_pred, [-1, h, w, b, 5 + c])
+
+        # grid cell
+        cell_h = K.tile(K.arange(h), [w])
+        cell_w = K.tile(K.expand_dims(K.arange(w), 0), [h, 1])
+        cell_w = K.reshape(K.transpose(cell_w), [-1])
+        cell_hw = K.stack([cell_h, cell_w], 1)
+        cell_hw = K.reshape(cell_hw, [-1, h, w, 1, 2])
+        cell_hw = K.cast(cell_hw, dtype='float32')
+
+        # anchor
+        anchor_tensor = np.reshape(anchors, [1, 1, 1, b, 2])
+
+        # prediction
+        pred_xy = K.sigmoid(pred[..., 0:2]) + cell_hw
+        pred_wh = K.exp(pred[..., 2:4]) * anchor_tensor
+        pred_obj = K.sigmoid(pred[..., 4:5])
+        pred_class = pred[..., 5:]
+
+        # ground truth
+        gt_xy = gt[..., 0:2]
+        gt_wh = gt[..., 2:4]
+        gt_obj = gt[..., 4:5]
+        gt_class = K.argmax(gt[..., 5:], axis=-1)
+
+        mask_ij = gt[..., 4:5]
+        print(mask_ij)
+        # K.print_tensor(mask_ij, message='mask_ij: ')
+
+        # print(tf.shape(y_true))
+        # print(tf.shape(y_pred))
+        # print(y_true)
+        # print(y_pred)
+        # y_true = tf.reshape(y_true, [None, h, w, b, 5 + c])
+        # y_pred = tf.reshape(y_pred, [None, h, w, b, 5 + c])
+
+        t = K.mean(y_true - y_pred)
         return t
 
     return loss_fn
