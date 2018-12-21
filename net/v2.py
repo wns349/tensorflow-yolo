@@ -151,8 +151,29 @@ def create_loss_fn(batch_size, net, anchors, class_names):
 
     gt_xy = gt[..., 0:2]
     gt_wh = gt[..., 2:4]
-    gt_obj = gt[..., 4:5]
+    gt_obj = gt[..., 4]
     gt_class = tf.argmax(gt[..., 5:], axis=-1)
+
+    gt_wh_half = gt_wh / 2.
+    gt_min = gt_xy - gt_wh_half
+    gt_max = gt_xy + gt_wh_half
+    gt_area = gt_wh[...,0] * gt_wh[..., 1]
+
+    pred_wh_half = pred_wh / 2.
+    pred_min = pred_xy - pred_wh_half
+    pred_max = pred_xy + pred_wh_half
+    pred_area = pred_wh[...,0] * pred_wh[...,1]
+
+    intersection_min = tf.maximum(pred_min, gt_min)
+    intersection_max = tf.minimum(pred_max, gt_max)
+    intersection_wh = tf.maximum(intersection_max - intersection_min, 0.)
+    intersection_area = intersection_wh[..., 0] * intersection_wh[..., 1]
+
+    union_area = pred_area + gt_area - intersection_area
+    iou_score = tf.truediv(intersection_area, union_area)
+
+    gt_obj = iou_score * gt_obj
+    gt_obj = tf.expand_dims(gt_obj, axis=-1)
 
     mask_ij = tf.expand_dims(gt_ij, axis=-1)
     mask_i = tf.expand_dims(gt_i, axis=-1)

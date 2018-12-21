@@ -142,21 +142,43 @@ def build_loss_fn(anchors, class_names):
         # ground truth
         gt_xy = gt[..., 0:2]
         gt_wh = gt[..., 2:4]
-        gt_obj = gt[..., 4:5]
         gt_class = K.argmax(gt[..., 5:], axis=-1)
 
+        # iou
+        gt_wh_half = gt_wh / 2.
+        gt_min = gt_xy - gt_wh_half
+        gt_max = gt_xy + gt_wh_half
+        gt_area = gt_wh[..., 0] * gt_wh[..., 1]
+        pred_wh_half = pred_wh / 2.
+        pred_min = pred_xy - pred_wh_half
+        pred_max = pred_xy + pred_wh_half
+        pred_area = pred_wh[..., 0] * pred_wh[..., 1]
+        intersection_min = K.maximum(pred_min, gt_min)
+        intersection_max = K.minimum(pred_max, gt_max)
+        intersection_wh = K.maximum(intersection_max - intersection_min, 0.)
+        intersection_area = intersection_wh[..., 0] * intersection_wh[..., 1]
+        union_area = pred_area + gt_area - intersection_area
+        iou_scores = tf.truediv(intersection_area, union_area)
+
+        # update gt
+        gt_obj = iou_scores * gt[..., 4]
+        gt_obj = K.expand_dims(gt_obj, axis=-1)
+
+        # get mask info
         mask_ij = gt[..., 4:5]
-        print(mask_ij)
-        # K.print_tensor(mask_ij, message='mask_ij: ')
+        mask_i = K.sum(mask_ij, axis=-2)
 
-        # print(tf.shape(y_true))
-        # print(tf.shape(y_pred))
-        # print(y_true)
-        # print(y_pred)
-        # y_true = tf.reshape(y_true, [None, h, w, b, 5 + c])
-        # y_pred = tf.reshape(y_pred, [None, h, w, b, 5 + c])
+        n_mask_ij = K.maximum(K.sum(tf.to_float(mask_ij > 0.0)), 1e-6)
+        n_mask_i = K.maximum(K.sum(tf.to_float(mask_i > 0.0)), 1e-6)
 
-        t = K.mean(y_true - y_pred)
-        return t
+        loss_xy = 1. * tf.reduce_sum(mask_ij * tf.square(gt_xy - pred_xy)) / n_mask_ij
+        loss_wh = 1. * tf.reduce_sum(mask_ij * tf.square(tf.sqrt(gt_wh) - tf.sqrt(pred_wh))) / n_mask_ij
+        loss_obj = 5. * tf.reduce_sum(mask_ij * tf.square(gt_obj - pred_obj)) / n_mask_ij
+        loss_noobj = 1. * tf.reduce_sum((1 - mask_ij) * tf.square(gt_obj - pred_obj)) / n_mask_ij
+        loss_class = 1. * tf.reduce_sum(
+            mask_i * tf.nn.sparse_softmax_cross_entropy_with_logits(labels=gt_class, logits=pred_class)) / n_mask_i
+
+        loss = loss_xy + loss_wh + loss_obj + loss_noobj + loss_class
+        return loss
 
     return loss_fn
