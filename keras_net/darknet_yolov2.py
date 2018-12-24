@@ -1,7 +1,9 @@
 import tensorflow as tf
-from tensorflow.python.keras import models
-from tensorflow.python.keras import layers
-from tensorflow.python.keras import backend as K
+from tensorflow.python import keras
+
+models = keras.models
+layers = keras.layers
+K = keras.backend
 
 import numpy as np
 
@@ -29,6 +31,7 @@ def build_model(input_tensor,
                               padding='SAME',
                               use_bias=True,
                               activation='linear',
+                              kernel_initializer='he_uniform',
                               name='block23_conv')(x)
 
     model = models.Model(img_input, x, name='darknet')

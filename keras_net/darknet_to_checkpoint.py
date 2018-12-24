@@ -1,9 +1,11 @@
 import numpy as np
-from tensorflow.python.keras import backend as K
-from tensorflow.python.keras.layers import Input
 
 from keras_net import darknet_yolov2
-from keras_net import yolo
+from tensorflow.python import keras
+
+K = keras.backend
+layers = keras.layers
+
 
 def load_darknet_weights(model, variable_placeholder, weights_path):
     # header
@@ -35,8 +37,9 @@ def load_darknet_weights(model, variable_placeholder, weights_path):
 
     print("Weights ({}/{} read)".format(read, len(weights)))
 
+
 if __name__ == '__main__':
-    input_layer = Input(shape=[416, 416, 3])
+    input_layer = layers.Input(shape=[416, 416, 3])
     model = darknet_yolov2.build_model(input_tensor=input_layer)
     print(model.summary())
     variable_placeholder = [v.op.name for v in model.variables]
@@ -44,5 +47,3 @@ if __name__ == '__main__':
     print("variables: ", variable_placeholder)
     load_darknet_weights(model, variable_placeholder, "../bin/yolov2.weights")
     model.save_weights("./checkpoints/full-yolov2-coco")
-
-    # yolo.test_model(model, "../img/dog.jpg")
